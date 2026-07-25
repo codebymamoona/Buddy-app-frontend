@@ -13,7 +13,7 @@ class ChatScreen extends StatefulWidget {
   final void Function(String item, double amount)? onPurchaseIntent;
   final VoidCallback? onGiftIntent;
 
-  const ChatScreen({super.key, this.onPurchaseIntent, this.onGiftIntent});
+  const ChatScreen({super.key, this.onPurchaseIntent, this.onGiftIntent, String? initialMessage});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();

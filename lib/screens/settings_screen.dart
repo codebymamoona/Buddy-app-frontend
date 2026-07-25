@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const _SettingsDivider(),
             _SettingsSwitchTile(
-              icon: Icons.chat_bubble_outline_rounded,
+              icon:Icons.notifications_outlined,
               title: 'Chat Bubble',
               subtitle: 'Show floating chat head over other apps',
               value: _chatBubbleEnabled,
