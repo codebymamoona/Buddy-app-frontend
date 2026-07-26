@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/buddy_api_service.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -12,15 +13,16 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailCtrl = TextEditingController();
+  final _userIdCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _api = BuddyApiService();
   bool _obscure = true;
   bool _loading = false;
   String? _error;
 
   @override
   void dispose() {
-    _emailCtrl.dispose();
+    _userIdCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
   }
@@ -32,12 +34,21 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
 
-    // TODO: replace with real POST /api/auth/login to your Spring Boot backend
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      final userId = _userIdCtrl.text.trim();
 
-    if (!mounted) return;
-    setState(() => _loading = false);
-    widget.onLoginSuccess(_emailCtrl.text.trim());
+      if (!mounted) return;
+      setState(() => _loading = false);
+
+      // Pass the backend-compatible User ID handle forward
+      widget.onLoginSuccess(userId);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Login failed: $e';
+      });
+    }
   }
 
   @override
@@ -72,25 +83,32 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Log in to continue to Buddy',
+                    'Log in to connect with your AI Buddy',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                   ),
                   const SizedBox(height: 32),
                   if (_error != null) ...[
-                    _ErrorBanner(message: _error!),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.danger.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                      ),
+                      child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
+                    ),
                     const SizedBox(height: 16),
                   ],
                   TextFormField(
-                    controller: _emailCtrl,
-                    keyboardType: TextInputType.emailAddress,
+                    controller: _userIdCtrl,
+                    keyboardType: TextInputType.text,
                     decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined, size: 20),
+                      labelText: 'User ID (e.g. shahzaib_99)',
+                      prefixIcon: Icon(Icons.person_outline, size: 20),
                     ),
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Email is required';
-                      if (!v.contains('@')) return 'Enter a valid email';
+                      if (v == null || v.trim().isEmpty) return 'User ID is required';
                       return null;
                     },
                   ),
@@ -108,7 +126,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Password is required';
-                      if (v.length < 6) return 'At least 6 characters';
                       return null;
                     },
                   ),
@@ -145,30 +162,6 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  final String message;
-  const _ErrorBanner({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.danger.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, size: 18, color: AppColors.danger),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message, style: const TextStyle(color: AppColors.danger, fontSize: 13))),
-        ],
       ),
     );
   }

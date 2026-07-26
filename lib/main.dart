@@ -13,7 +13,7 @@ import 'screens/chat_screen.dart';
 import 'screens/approval_screen.dart';
 import 'screens/friend_profile_screen.dart';
 import 'screens/audit_trail_screen.dart';
-import 'screens/gift_recommendation_screen.dart';
+//import 'screens/gift_recommendation_screen.dart';
 import 'screens/spending_cap_settings_screen.dart';
 import 'screens/settings_screen.dart';
 import 'dart:async';
@@ -335,26 +335,19 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   String? _loggedInEmail;
-  UserPreferences? _preferences;
 
   void _handleLoginSuccess(String email) => setState(() => _loggedInEmail = email);
 
   void _handleLogout() => setState(() {
     _loggedInEmail = null;
-    _preferences = null;
   });
-
-  void _handlePreferencesComplete(UserPreferences prefs) =>
-      setState(() => _preferences = prefs);
 
   @override
   Widget build(BuildContext context) {
     if (_loggedInEmail == null) {
       return LoginScreen(onLoginSuccess: _handleLoginSuccess);
     }
-    if (_preferences == null) {
-      return PreferencesScreen(onComplete: _handlePreferencesComplete);
-    }
+    // Bypassed PreferencesScreen entirely to keep backend logic clean and stable
     return HomeTabs(userEmail: _loggedInEmail!, onLogout: _handleLogout);
   }
 }
@@ -479,10 +472,11 @@ class _HomeTabsState extends State<HomeTabs> {
     }
   }
 
-  void _handleChatPurchaseIntent(String item, double amount) {
+  // PARAMETERS REMOVED HERE
+  void _handleChatPurchaseIntent() {
     setState(() {
-      _pendingItem = item;
-      _pendingAmount = amount;
+      _pendingItem = "Pending AI Draft (Check Database)";
+      _pendingAmount = 0.0;
     });
 
     // Notify the floating bubble overlay to increment badge
@@ -572,7 +566,8 @@ class _HomeTabsState extends State<HomeTabs> {
       ChatScreen(
         initialMessage: _pendingQuickReplyMessage, // Pass incoming quick reply
         onPurchaseIntent: _handleChatPurchaseIntent,
-        onGiftIntent: () => setState(() => _index = 4),
+        // onGiftIntent: () => setState(() => _index = 4),
+        userId: widget.userEmail, // <-- FIXED: Injected the logged-in user ID
       ),
       ApprovalScreen(
         itemDescription: _pendingItem,
@@ -583,8 +578,8 @@ class _HomeTabsState extends State<HomeTabs> {
       ),
       const FriendProfileScreen(),
       AuditTrailScreen(entries: _auditEntries),
-      GiftRecommendationScreen(
-          friendName: 'Ayesha', ideas: _giftIdeas, onOrder: _handleOrderGift),
+      // GiftRecommendationScreen(
+      //     friendName: 'Ayesha', ideas: _giftIdeas, onOrder: _handleOrderGift),
       SettingsScreen(
         userEmail: widget.userEmail,
         onLogout: widget.onLogout,
@@ -595,57 +590,72 @@ class _HomeTabsState extends State<HomeTabs> {
     // Clear pending quick message after injecting it to prevent repeated calls
     _pendingQuickReplyMessage = null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_titles[_index]),
-        automaticallyImplyLeading: false,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: CircleAvatar(
-              radius: 15,
-              backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-              child: Text(
-                widget.userEmail.isNotEmpty ? widget.userEmail[0].toUpperCase() : '?',
-                style: const TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13),
+    return PopScope(
+      canPop: _index == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          // If we are not on the Chat tab, route back to Chat instead of closing
+          setState(() => _index = 0);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_titles[_index]),
+          automaticallyImplyLeading: false,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: CircleAvatar(
+                radius: 15,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                child: Text(
+                  widget.userEmail.isNotEmpty ? widget.userEmail[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13),
+                ),
               ),
             ),
+          ],
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: IndexedStack(
+            index: _index,
+            children: screens,
           ),
-        ],
-      ),
-      body: SafeArea(bottom: false, child: screens[_index]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline),
-              selectedIcon: Icon(Icons.chat_bubble),
-              label: 'Chat'),
-          NavigationDestination(
-              icon: Icon(Icons.check_circle_outline),
-              selectedIcon: Icon(Icons.check_circle),
-              label: 'Approve'),
-          NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              selectedIcon: Icon(Icons.person),
-              label: 'Friend'),
-          NavigationDestination(
-              icon: Icon(Icons.history),
-              selectedIcon: Icon(Icons.history_toggle_off),
-              label: 'Audit'),
-          NavigationDestination(
-              icon: Icon(Icons.card_giftcard_outlined),
-              selectedIcon: Icon(Icons.card_giftcard),
-              label: 'Gifts'),
-          NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Settings'),
-        ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) => setState(() => _index = i),
+          destinations: const [
+            NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                selectedIcon: Icon(Icons.chat_bubble),
+                label: 'Chat'),
+            NavigationDestination(
+                icon: Icon(Icons.check_circle_outline),
+                selectedIcon: Icon(Icons.check_circle),
+                label: 'Approve'),
+            NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person),
+                label: 'Friend'),
+            NavigationDestination(
+                icon: Icon(Icons.history),
+                selectedIcon: Icon(Icons.history_toggle_off),
+                label: 'Audit'),
+            // NavigationDestination(
+            //     icon: Icon(Icons.card_giftcard_outlined),
+            //     selectedIcon: Icon(Icons.card_giftcard),
+            //     label: 'Gifts'),
+            NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Settings'),
+          ],
+        ),
       ),
     );
   }

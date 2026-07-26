@@ -33,7 +33,7 @@ dependencies:
   intl: ^0.19.0
   http: ^1.2.2
   flutter_overlay_window: ^0.5.0
-  bring_app_to_foreground: ^0.1.1
+
 
 dev_dependencies:
   flutter_test:

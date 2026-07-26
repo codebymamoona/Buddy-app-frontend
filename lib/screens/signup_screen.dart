@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 class SignupScreen extends StatefulWidget {
-  final void Function(String email) onSignupSuccess;
+  final void Function(String userId) onSignupSuccess;
   const SignupScreen({super.key, required this.onSignupSuccess});
 
   @override
@@ -12,7 +12,7 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
+  final _userIdCtrl = TextEditingController(); // Changed from email
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _obscure = true;
@@ -21,7 +21,7 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _emailCtrl.dispose();
+    _userIdCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
@@ -31,12 +31,15 @@ class _SignupScreenState extends State<SignupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    // TODO: replace with real POST /api/auth/signup to your Spring Boot backend
+    // TODO: Replace this mock delay with a real POST /api/auth/signup
+    // to your Spring Boot backend to insert the new user into PostgreSQL.
     await Future.delayed(const Duration(milliseconds: 600));
 
     if (!mounted) return;
     setState(() => _loading = false);
-    widget.onSignupSuccess(_emailCtrl.text.trim());
+
+    // Pass the newly created User ID straight into the session
+    widget.onSignupSuccess(_userIdCtrl.text.trim());
     Navigator.of(context).pop();
   }
 
@@ -63,15 +66,15 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
-                  controller: _emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
+                  controller: _userIdCtrl,
+                  keyboardType: TextInputType.text, // Changed to standard text
                   decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined, size: 20),
+                    labelText: 'User ID (e.g. shahzaib_99)', // Enforcing the tenant handle
+                    prefixIcon: Icon(Icons.alternate_email, size: 20),
                   ),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Email is required';
-                    if (!v.contains('@')) return 'Enter a valid email';
+                    if (v == null || v.trim().isEmpty) return 'User ID is required';
+                    if (v.contains(' ')) return 'User ID cannot contain spaces';
                     return null;
                   },
                 ),

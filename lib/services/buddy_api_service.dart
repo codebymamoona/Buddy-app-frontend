@@ -4,51 +4,67 @@ import '../config/api_config.dart';
 
 class BuddyApiService {
   final String baseUrl;
-  BuddyApiService({this.baseUrl = ApiConfig.baseUrl});
+  BuddyApiService({String? baseUrl})
+      : baseUrl = baseUrl ?? ApiConfig.baseUrl;
 
   // ---------------------------------------------------------------------
   // 1. CHAT
-  // POST /api/chat
-  // Request:  { "message": "order a cake for Ayesha" }
-  // Response: { "reply": "...", "intent": "PURCHASE"|"GIFT"|"CHAT",
-  //             "item": "..." | null, "amount": number | null }
+  // POST /chat
+  // Request:  { "userId": "...", "message": "order a cake" }
+  // Response: Raw String (Mapped safely to BuddyChatResponse)
   // ---------------------------------------------------------------------
-  Future<BuddyChatResponse> sendMessage(String message) async {
-    final uri = Uri.parse('$baseUrl/api/chat');
-    final response = await _post(uri, {'message': message});
-    return BuddyChatResponse.fromJson(response);
+  Future<BuddyChatResponse> sendMessage(String userId, String message) async {
+    // Removed the duplicate '/api'
+    final uri = Uri.parse('$baseUrl/chat');
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        // Added the required userId for tenant isolation
+        body: jsonEncode({
+          'userId': userId,
+          'message': message
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      _checkStatus(response);
+
+      // We bypass jsonDecode because Spring Boot returns a raw string.
+      // We map it manually to keep your UI models happy.
+      return BuddyChatResponse(
+        reply: response.body,
+        intent: 'CHAT',
+      );
+    } on http.ClientException {
+      throw BuddyApiException('Could not reach Buddy — is the server running?');
+    }
   }
 
   // ---------------------------------------------------------------------
   // 2. SPENDING CAP
-  // GET /api/spending-cap  -> { "limit": 2000.0, "used": 450.0 }
-  // PUT /api/spending-cap  <- { "limit": 2500.0 }
-  //                        -> { "limit": 2500.0, "used": 450.0 }
   // ---------------------------------------------------------------------
   Future<SpendingCapResponse> getSpendingCap() async {
-    final uri = Uri.parse('$baseUrl/api/spending-cap');
+    final uri = Uri.parse('$baseUrl/spending-cap');
     final response = await _get(uri);
     return SpendingCapResponse.fromJson(response);
   }
 
   Future<SpendingCapResponse> updateSpendingCap(double newLimit) async {
-    final uri = Uri.parse('$baseUrl/api/spending-cap');
+    final uri = Uri.parse('$baseUrl/spending-cap');
     final response = await _put(uri, {'limit': newLimit});
     return SpendingCapResponse.fromJson(response);
   }
 
   // ---------------------------------------------------------------------
   // 3. APPROVAL
-  // POST /api/approval
-  // Request:  { "approved": true, "item": "...", "amount": 450.0 }
-  // Response: { "status": "ok" }
   // ---------------------------------------------------------------------
   Future<void> submitApproval({
     required bool approved,
     required String item,
     required double amount,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/approval');
+    final uri = Uri.parse('$baseUrl/approval');
     await _post(uri, {
       'approved': approved,
       'item': item,
@@ -58,10 +74,9 @@ class BuddyApiService {
 
   // ---------------------------------------------------------------------
   // 4. AUDIT LOG
-  // GET /api/audit-log -> [ { "timestamp": "...", "action": "...", "detail": "..." }, ... ]
   // ---------------------------------------------------------------------
   Future<List<AuditLogEntryResponse>> getAuditLog() async {
-    final uri = Uri.parse('$baseUrl/api/audit-log');
+    final uri = Uri.parse('$baseUrl/audit-log');
     final response = await http.get(uri).timeout(const Duration(seconds: 15));
     _checkStatus(response);
     final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
@@ -72,17 +87,13 @@ class BuddyApiService {
 
   // ---------------------------------------------------------------------
   // 5. FRIEND PROFILE
-  // POST /api/friend-profile
-  //   Request:  { "name": "...", "birthday": "..." | null, "likes": ["..."] }
-  //   Response: { "status": "ok" }
-  // GET /api/friend-profile/{name} -> { "name": "...", "birthday": "...", "likes": [...] }
   // ---------------------------------------------------------------------
   Future<void> saveFriendProfile({
     required String name,
     String? birthday,
     required List<String> likes,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/friend-profile');
+    final uri = Uri.parse('$baseUrl/friend-profile');
     await _post(uri, {
       'name': name,
       'birthday': birthday,
@@ -91,7 +102,7 @@ class BuddyApiService {
   }
 
   Future<FriendProfileResponse> getFriendProfile(String name) async {
-    final uri = Uri.parse('$baseUrl/api/friend-profile/$name');
+    final uri = Uri.parse('$baseUrl/friend-profile/$name');
     final response = await _get(uri);
     return FriendProfileResponse.fromJson(response);
   }
@@ -144,7 +155,6 @@ class BuddyApiService {
 // ---------------------------------------------------------------------
 // Response models
 // ---------------------------------------------------------------------
-
 class BuddyChatResponse {
   final String reply;
   final String intent;

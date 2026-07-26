@@ -6,14 +6,22 @@ class ChatMessage {
   final String text;
   final bool fromUser;
   final bool isAction;
-  ChatMessage(this.text, this.fromUser, {this.isAction = false});
+  final String? intent;
+
+  ChatMessage(this.text, this.fromUser, {this.isAction = false, this.intent});
 }
 
 class ChatScreen extends StatefulWidget {
-  final void Function(String item, double amount)? onPurchaseIntent;
-  final VoidCallback? onGiftIntent;
+  final void Function()? onPurchaseIntent;
+  final String? initialMessage;
+  final String userId;
 
-  const ChatScreen({super.key, this.onPurchaseIntent, this.onGiftIntent, String? initialMessage});
+  const ChatScreen({
+    super.key,
+    this.onPurchaseIntent,
+    this.initialMessage,
+    required this.userId,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -23,8 +31,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   final _api = BuddyApiService();
+
+  // Updated welcome message reflecting current scope (Food & Spending Cap only)
   final List<ChatMessage> _messages = [
-    ChatMessage("Hi, I'm Buddy. I can order food or suggest gifts for your friends. What do you need?", false),
+    ChatMessage("Hi, I'm Buddy. I can help you order food and manage your spending approvals. What do you need?", false),
   ];
   bool _typing = false;
 
@@ -52,89 +62,42 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
 
     try {
-      // Try the real backend first.
-      final response = await _api.sendMessage(text);
+      // 1. Send to the real Spring Boot LangChain4j Backend
+      final response = await _api.sendMessage(widget.userId, text);
       if (!mounted) return;
 
       setState(() {
         _typing = false;
         _messages.add(ChatMessage(response.reply, false));
-        if (response.intent == 'PURCHASE' && response.item != null && response.amount != null) {
-          _messages.add(ChatMessage('Review & Approve →', false, isAction: true));
-        } else if (response.intent == 'GIFT') {
-          _messages.add(ChatMessage('View Gift Ideas →', false, isAction: true));
-        }
-      });
 
-      if (response.intent == 'PURCHASE' && response.item != null && response.amount != null) {
-        widget.onPurchaseIntent?.call(response.item!, response.amount!);
-      } else if (response.intent == 'GIFT') {
-        widget.onGiftIntent?.call();
-      }
+        // 2. Parse LLM response strictly for purchase/approval action triggers
+        final lowerReply = response.reply.toLowerCase();
+        if (lowerReply.contains("draft") ||
+            lowerReply.contains("approve") ||
+            lowerReply.contains("review") ||
+            lowerReply.contains("order")) {
+          _messages.add(ChatMessage('Review & Approve →', false, isAction: true, intent: 'PURCHASE'));
+        }
+        // Gift intents are now intentionally ignored to match the reduced scope.
+      });
     } catch (e) {
-      // Backend unreachable or returned something unexpected —
-      // fall back to local intent detection so navigation still works.
-      // TODO: remove this fallback once /api/chat is confirmed stable.
       if (!mounted) return;
-      _handleLocalFallback(text);
+
+      // 3. Fail loudly and securely
+      setState(() {
+        _typing = false;
+        _messages.add(ChatMessage("System Error: Could not reach the AI core. $e", false));
+      });
     }
 
     _scrollToBottom();
   }
 
-  void _handleLocalFallback(String text) {
-    final lower = text.toLowerCase();
-
-    if (_containsAny(lower, ['order', 'buy', 'cake', 'food', 'pizza', 'lunch', 'dinner'])) {
-      final amount = _extractAmount(lower) ?? 450;
-      final item = _extractItemDescription(text);
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage(
-          "Sure — I found an order for Rs ${amount.toStringAsFixed(0)}. Since this involves spending, I need your approval before placing it.",
-          false,
-        ));
-        _messages.add(ChatMessage('Review & Approve →', false, isAction: true));
-      });
-      widget.onPurchaseIntent?.call(item, amount);
-    } else if (_containsAny(lower, ['gift', 'present', 'suggest', 'recommend'])) {
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage(
-          "Let me pull up some gift ideas based on what you've told me about your friend.",
-          false,
-        ));
-        _messages.add(ChatMessage('View Gift Ideas →', false, isAction: true));
-      });
-      widget.onGiftIntent?.call();
-    } else if (_containsAny(lower, ['hi', 'hello', 'hey'])) {
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage("Hey! Want me to order something or suggest a gift?", false));
-      });
-    } else {
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage(
-          "I can help with ordering food or suggesting gifts — try something like \"order a cake for Ayesha\" or \"suggest a gift for Ayesha.\"",
-          false,
-        ));
-      });
+  // Handles the tap on the Action Chips (Purchase only)
+  void _handleActionTap(String? intent) {
+    if (intent == 'PURCHASE') {
+      widget.onPurchaseIntent?.call();
     }
-  }
-
-  bool _containsAny(String text, List<String> keywords) => keywords.any((k) => text.contains(k));
-
-  double? _extractAmount(String text) {
-    final match = RegExp(r'(\d+(\.\d+)?)').firstMatch(text);
-    if (match == null) return null;
-    return double.tryParse(match.group(0)!);
-  }
-
-  String _extractItemDescription(String original) {
-    final trimmed = original.trim();
-    if (trimmed.isEmpty) return 'Order';
-    return trimmed[0].toUpperCase() + trimmed.substring(1);
   }
 
   @override
@@ -149,7 +112,7 @@ class _ChatScreenState extends State<ChatScreen> {
             itemBuilder: (context, i) {
               if (_typing && i == _messages.length) return _buildTypingIndicator();
               final m = _messages[i];
-              if (m.isAction) return _buildActionChip(m.text);
+              if (m.isAction) return _buildActionChip(m);
               return _buildBubble(context, m);
             },
           ),
@@ -165,7 +128,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         mainAxisAlignment: m.fromUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         children: [
-          if (!m.fromUser) ...[
+          if (!m.fromUser && !m.isAction) ...[
             const CircleAvatar(
               radius: 14,
               backgroundColor: AppColors.primary,
@@ -175,7 +138,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
           Flexible(
             child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: BoxDecoration(
                 color: m.fromUser ? AppColors.primary : Colors.white,
@@ -190,7 +153,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Text(
                 m.text,
                 style: TextStyle(
-                  color: m.fromUser ? Colors.white : AppColors.textPrimary,
+                  color: m.fromUser ? Colors.white : (m.text.contains("System Error") ? Colors.red : AppColors.textPrimary),
                   fontSize: 14.5,
                   height: 1.35,
                 ),
@@ -202,19 +165,22 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildActionChip(String label) {
+  Widget _buildActionChip(ChatMessage m) {
     return Padding(
       padding: const EdgeInsets.only(left: 36, bottom: 8),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        child: GestureDetector(
+          onTap: () => _handleActionTap(m.intent),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+            ),
+            child: Text(m.text, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 13)),
           ),
-          child: Text(label, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 13)),
         ),
       ),
     );
@@ -231,7 +197,7 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Icon(Icons.smart_toy_outlined, size: 15, color: Colors.white),
           ),
           SizedBox(width: 8),
-          Text('Buddy is typing…', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+          Text('Buddy is thinking…', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
         ],
       ),
     );
