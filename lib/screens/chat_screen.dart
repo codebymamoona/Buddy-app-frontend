@@ -1,237 +1,277 @@
+"chat_screen"
+
 import 'package:flutter/material.dart';
+import '../models/app_state.dart';
+import '../models/chat_message.dart';
 import '../theme/app_theme.dart';
-import '../services/buddy_api_service.dart';
-
-class ChatMessage {
-  final String text;
-  final bool fromUser;
-  final bool isAction;
-  final String? intent;
-
-  ChatMessage(this.text, this.fromUser, {this.isAction = false, this.intent});
-}
+import '../widgets/animated_logo.dart';
+import '../widgets/common.dart';
 
 class ChatScreen extends StatefulWidget {
-  final void Function()? onPurchaseIntent;
-  final String? initialMessage;
-  final String userId;
+const ChatScreen({super.key});
 
-  const ChatScreen({
-    super.key,
-    this.onPurchaseIntent,
-    this.initialMessage,
-    required this.userId,
-  });
-
-  @override
-  State<ChatScreen> createState() => _ChatScreenState();
+@override
+State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _controller = TextEditingController();
-  final _scrollController = ScrollController();
-  final _api = BuddyApiService();
+final TextEditingController _controller = TextEditingController();
+final ScrollController _scroll = ScrollController();
+bool _buddyTyping = false;
 
-  // Updated welcome message reflecting current scope (Food & Spending Cap only)
-  final List<ChatMessage> _messages = [
-    ChatMessage("Hi, I'm Buddy. I can help you order food and manage your spending approvals. What do you need?", false),
-  ];
-  bool _typing = false;
+final List<ChatMessage> _messages = [
+ChatMessage(
+fromBuddy: true,
+text: "Hi, I'm Buddy. I can order food or suggest gifts for your friends. What do you need?",
+),
+];
 
-  void _scrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
+void _send([String? preset]) {
+final text = preset ?? _controller.text.trim();
+if (text.isEmpty) return;
+setState(() {
+_messages.add(ChatMessage(text: text, fromBuddy: false));
+_controller.clear();
+_buddyTyping = true;
+});
+_scrollToBottom();
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
+Future.delayed(const Duration(milliseconds: 900), () {
+if (!mounted) return;
+String reply;
+final lower = text.toLowerCase();
+if (lower.contains('cake') || lower.contains('order') || lower.contains('birthday')) {
+reply = "Got it! I've sent a Rs 450 birthday cake order for Ayesha to your Approvals tab for confirmation 🎂";
+AppState.instance.requestApproval('Birthday cake order for Ayesha', 450);
+} else if (lower.contains('gift')) {
+reply = "Here are a couple of gift ideas — check the Gifts tab, I've queued a scented candle set for approval 🎁";
+} else {
+reply = "On it! I'll take care of that and let you know if I need your approval.";
+}
+setState(() {
+_buddyTyping = false;
+_messages.add(ChatMessage(text: reply, fromBuddy: true));
+});
+_scrollToBottom();
+});
+}
 
-    setState(() {
-      _messages.add(ChatMessage(text, true));
-      _controller.clear();
-      _typing = true;
-    });
-    _scrollToBottom();
+void _scrollToBottom() {
+Future.delayed(const Duration(milliseconds: 80), () {
+if (!_scroll.hasClients) return;
+_scroll.animateTo(_scroll.position.maxScrollExtent + 120,
+duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+});
+}
 
-    try {
-      // 1. Send to the real Spring Boot LangChain4j Backend
-      final response = await _api.sendMessage(widget.userId, text);
-      if (!mounted) return;
+@override
+void dispose() {
+_controller.dispose();
+_scroll.dispose();
+super.dispose();
+}
 
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage(response.reply, false));
+@override
+Widget build(BuildContext context) {
+return Scaffold(
+appBar: const BuddyAppBar(title: 'Buddy AI Assistant', trailing: UserAvatar()),
+body: Column(
+children: [
+Expanded(
+child: ListView.builder(
+controller: _scroll,
+padding: const EdgeInsets.all(16),
+itemCount: _messages.length + (_buddyTyping ? 1 : 0),
+itemBuilder: (context, index) {
+if (index == _messages.length) {
+return const _TypingBubble();
+}
+final m = _messages[index];
+return TweenAnimationBuilder<double>(
+tween: Tween(begin: 0, end: 1),
+duration: const Duration(milliseconds: 320),
+curve: Curves.easeOutCubic,
+builder: (context, t, child) => Opacity(
+opacity: t,
+child: Transform.translate(offset: Offset(0, (1 - t) * 12), child: child),
+),
+child: _MessageBubble(message: m),
+);
+},
+),
+),
+_QuickChips(onTap: _send),
+_Composer(controller: _controller, onSend: () => _send()),
+],
+),
+);
+}
+}
 
-        // 2. Parse LLM response strictly for purchase/approval action triggers
-        final lowerReply = response.reply.toLowerCase();
-        if (lowerReply.contains("draft") ||
-            lowerReply.contains("approve") ||
-            lowerReply.contains("review") ||
-            lowerReply.contains("order")) {
-          _messages.add(ChatMessage('Review & Approve →', false, isAction: true, intent: 'PURCHASE'));
-        }
-        // Gift intents are now intentionally ignored to match the reduced scope.
-      });
-    } catch (e) {
-      if (!mounted) return;
+class _MessageBubble extends StatelessWidget {
+final ChatMessage message;
+const _MessageBubble({required this.message});
 
-      // 3. Fail loudly and securely
-      setState(() {
-        _typing = false;
-        _messages.add(ChatMessage("System Error: Could not reach the AI core. $e", false));
-      });
-    }
+@override
+Widget build(BuildContext context) {
+final isBuddy = message.fromBuddy;
+return Padding(
+padding: const EdgeInsets.symmetric(vertical: 6),
+child: Row(
+mainAxisAlignment: isBuddy ? MainAxisAlignment.start : MainAxisAlignment.end,
+crossAxisAlignment: CrossAxisAlignment.end,
+children: [
+if (isBuddy) ...[
+Container(
+width: 30,
+height: 30,
+margin: const EdgeInsets.only(right: 8),
+decoration: const BoxDecoration(color: AppColors.primaryRed, shape: BoxShape.circle),
+child: const Icon(Icons.smart_toy_rounded, color: Colors.white, size: 16),
+),
+],
+Flexible(
+child: Container(
+padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+decoration: BoxDecoration(
+color: isBuddy ? AppColors.surface : AppColors.primary,
+borderRadius: BorderRadius.only(
+topLeft: const Radius.circular(18),
+topRight: const Radius.circular(18),
+bottomLeft: Radius.circular(isBuddy ? 4 : 18),
+bottomRight: Radius.circular(isBuddy ? 18 : 4),
+),
+boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+),
+child: Text(
+message.text,
+style: TextStyle(color: isBuddy ? AppColors.pureBlack : Colors.white, fontSize: 14.5, height: 1.35),
+),
+),
+),
+],
+),
+);
+}
+}
 
-    _scrollToBottom();
-  }
+class _TypingBubble extends StatefulWidget {
+const _TypingBubble();
+@override
+State<_TypingBubble> createState() => _TypingBubbleState();
+}
 
-  // Handles the tap on the Action Chips (Purchase only)
-  void _handleActionTap(String? intent) {
-    if (intent == 'PURCHASE') {
-      widget.onPurchaseIntent?.call();
-    }
-  }
+class _TypingBubbleState extends State<_TypingBubble> with SingleTickerProviderStateMixin {
+late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16),
-            itemCount: _messages.length + (_typing ? 1 : 0),
-            itemBuilder: (context, i) {
-              if (_typing && i == _messages.length) return _buildTypingIndicator();
-              final m = _messages[i];
-              if (m.isAction) return _buildActionChip(m);
-              return _buildBubble(context, m);
-            },
-          ),
-        ),
-        _buildInputBar(),
-      ],
-    );
-  }
+@override
+void dispose() {
+_c.dispose();
+super.dispose();
+}
 
-  Widget _buildBubble(BuildContext context, ChatMessage m) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment: m.fromUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        children: [
-          if (!m.fromUser && !m.isAction) ...[
-            const CircleAvatar(
-              radius: 14,
-              backgroundColor: AppColors.primary,
-              child: Icon(Icons.smart_toy_outlined, size: 15, color: Colors.white),
-            ),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-              decoration: BoxDecoration(
-                color: m.fromUser ? AppColors.primary : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(m.fromUser ? 16 : 4),
-                  bottomRight: Radius.circular(m.fromUser ? 4 : 16),
-                ),
-                border: m.fromUser ? null : Border.all(color: AppColors.border),
-              ),
-              child: Text(
-                m.text,
-                style: TextStyle(
-                  color: m.fromUser ? Colors.white : (m.text.contains("System Error") ? Colors.red : AppColors.textPrimary),
-                  fontSize: 14.5,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+@override
+Widget build(BuildContext context) {
+return Align(
+alignment: Alignment.centerLeft,
+child: Container(
+margin: const EdgeInsets.symmetric(vertical: 6),
+padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(18)),
+child: Row(
+mainAxisSize: MainAxisSize.min,
+children: List.generate(3, (i) {
+return AnimatedBuilder(
+animation: _c,
+builder: (context, _) {
+final v = ((_c.value + i * 0.2) % 1.0);
+final scale = 0.6 + 0.4 * (1 - (v - 0.5).abs() * 2).clamp(0.0, 1.0);
+return Padding(
+padding: const EdgeInsets.symmetric(horizontal: 2),
+child: Transform.scale(
+scale: scale,
+child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: AppColors.grey, shape: BoxShape.circle)),
+),
+);
+},
+);
+}),
+),
+),
+);
+}
+}
 
-  Widget _buildActionChip(ChatMessage m) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 36, bottom: 8),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: GestureDetector(
-          onTap: () => _handleActionTap(m.intent),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
-            ),
-            child: Text(m.text, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 13)),
-          ),
-        ),
-      ),
-    );
-  }
+class _QuickChips extends StatelessWidget {
+final ValueChanged<String> onTap;
+const _QuickChips({required this.onTap});
 
-  Widget _buildTypingIndicator() {
-    return const Padding(
-      padding: EdgeInsets.only(left: 36, bottom: 8),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 14,
-            backgroundColor: AppColors.primary,
-            child: Icon(Icons.smart_toy_outlined, size: 15, color: Colors.white),
-          ),
-          SizedBox(width: 8),
-          Text('Buddy is thinking…', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
-        ],
-      ),
-    );
-  }
+@override
+Widget build(BuildContext context) {
+const suggestions = ['Order a birthday cake', 'Suggest a gift', 'Remind me tomorrow'];
+return SizedBox(
+height: 44,
+child: ListView.separated(
+scrollDirection: Axis.horizontal,
+padding: const EdgeInsets.symmetric(horizontal: 16),
+itemCount: suggestions.length,
+separatorBuilder: (_, __) => const SizedBox(width: 8),
+itemBuilder: (context, i) {
+return ReactiveButton(
+onTap: () => onTap(suggestions[i]),
+child: Container(
+padding: const EdgeInsets.symmetric(horizontal: 14),
+alignment: Alignment.center,
+decoration: BoxDecoration(
+color: AppColors.white,
+borderRadius: BorderRadius.circular(30),
+border: Border.all(color: AppColors.border),
+),
+child: Text(suggestions[i], style: const TextStyle(fontSize: 13, color: AppColors.pureBlack)),
+),
+);
+},
+),
+);
+}
+}
 
-  Widget _buildInputBar() {
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.border))),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                decoration: InputDecoration(
-                  hintText: 'Message Buddy…',
-                  filled: true,
-                  fillColor: AppColors.bg,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                ),
-                onSubmitted: (_) => _send(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-              child: IconButton(icon: const Icon(Icons.arrow_upward, color: Colors.white, size: 20), onPressed: _send),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+class _Composer extends StatelessWidget {
+final TextEditingController controller;
+final VoidCallback onSend;
+const _Composer({required this.controller, required this.onSend});
+
+@override
+Widget build(BuildContext context) {
+return SafeArea(
+top: false,
+child: Padding(
+padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+child: Row(
+children: [
+const AnimatedBuddyLogo(size: 30),
+const SizedBox(width: 10),
+Expanded(
+child: TextField(
+controller: controller,
+onSubmitted: (_) => onSend(),
+decoration: const InputDecoration(hintText: 'Message Buddy...'),
+),
+),
+const SizedBox(width: 10),
+ReactiveButton(
+onTap: onSend,
+borderRadius: BorderRadius.circular(30),
+child: Container(
+width: 46,
+height: 46,
+decoration: const BoxDecoration(gradient: AppColors.redGradient, shape: BoxShape.circle),
+child: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+),
+),
+],
+),
+),
+);
+}
 }
