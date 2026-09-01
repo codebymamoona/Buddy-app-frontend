@@ -17,6 +17,7 @@ import 'screens/audit_trail_screen.dart';
 import 'screens/spending_cap_settings_screen.dart';
 import 'screens/settings_screen.dart';
 import 'dart:async';
+import 'services/buddy_api_service.dart';
 
 StreamSubscription? _overlaySubscription;
 
@@ -372,10 +373,30 @@ class _HomeTabsState extends State<HomeTabs> {
   double _pendingAmount = 450;
   String _pendingItem = 'Birthday cake order for Ayesha';
 
-  final List<AuditEntry> _auditEntries = [
-    AuditEntry(
-        timestamp: DateTime.now(), action: 'Order placed', detail: 'Cake, Rs 450'),
-  ];
+  List<AuditEntry> _auditEntries = [];
+  bool _isLoadingLogs = false;
+
+  Future<void> _fetchAuditLogs() async {
+    setState(() => _isLoadingLogs = true);
+    try {
+      // Fetch logs for the specifically logged-in user
+      final responseLogs = await BuddyApiService().getAuditLog(widget.userEmail);
+
+      if (!mounted) return;
+      setState(() {
+        _auditEntries = responseLogs.map((log) => AuditEntry(
+          // Assuming your timestamp is a valid ISO string from Spring Boot
+          timestamp: DateTime.tryParse(log.timestamp) ?? DateTime.now(),
+          action: log.action,
+          detail: log.detail,
+        )).toList();
+      });
+    } catch (e) {
+      _showSnack('Failed to load audit logs: $e', AppColors.danger);
+    } finally {
+      if (mounted) setState(() => _isLoadingLogs = false);
+    }
+  }
 
   final List<GiftIdea> _giftIdeas = [
     GiftIdea(
@@ -628,7 +649,13 @@ class _HomeTabsState extends State<HomeTabs> {
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() => _index = i),
+          onDestinationSelected: (i) {
+            setState(() => _index = i);
+            // 🚨 THE FIX: Actually fetch the real database logs when the Audit tab (index 3) is clicked
+            if (i == 3) {
+              _fetchAuditLogs();
+            }
+          },
           destinations: const [
             NavigationDestination(
                 icon: Icon(Icons.chat_bubble_outline),

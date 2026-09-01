@@ -8,20 +8,63 @@ class BuddyApiService {
       : baseUrl = baseUrl ?? ApiConfig.baseUrl;
 
   // ---------------------------------------------------------------------
+  // 0. AUTHENTICATION
+  // ---------------------------------------------------------------------
+
+  Future<void> login(String userId, String password) async {
+    final uri = Uri.parse('$baseUrl/auth/login');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      // We handle status manually here because Spring Boot returns raw text,
+      // not JSON, which would crash your _post helper.
+      if (response.statusCode != 200) {
+        throw BuddyApiException(response.body.isNotEmpty ? response.body : 'Login failed (${response.statusCode})');
+      }
+    } on http.ClientException {
+      throw BuddyApiException('Could not reach Buddy — is the server running?');
+    }
+  }
+
+  Future<void> signup(String userId, String fullName, String password) async {
+    final uri = Uri.parse('$baseUrl/auth/signup');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'fullName': fullName,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        throw BuddyApiException(response.body.isNotEmpty ? response.body : 'Signup failed (${response.statusCode})');
+      }
+    } on http.ClientException {
+      throw BuddyApiException('Could not reach Buddy — is the server running?');
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // 1. CHAT
   // POST /chat
-  // Request:  { "userId": "...", "message": "order a cake" }
-  // Response: Raw String (Mapped safely to BuddyChatResponse)
   // ---------------------------------------------------------------------
   Future<BuddyChatResponse> sendMessage(String userId, String message) async {
-    // Removed the duplicate '/api'
     final uri = Uri.parse('$baseUrl/chat');
 
     try {
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
-        // Added the required userId for tenant isolation
         body: jsonEncode({
           'userId': userId,
           'message': message
@@ -31,7 +74,6 @@ class BuddyApiService {
       _checkStatus(response);
 
       // We bypass jsonDecode because Spring Boot returns a raw string.
-      // We map it manually to keep your UI models happy.
       return BuddyChatResponse(
         reply: response.body,
         intent: 'CHAT',
@@ -75,9 +117,11 @@ class BuddyApiService {
   // ---------------------------------------------------------------------
   // 4. AUDIT LOG
   // ---------------------------------------------------------------------
-  Future<List<AuditLogEntryResponse>> getAuditLog() async {
-    final uri = Uri.parse('$baseUrl/audit-log');
+  Future<List<AuditLogEntryResponse>> getAuditLog(String userId) async {
+    // Inject the userId into the URL query string
+    final uri = Uri.parse('$baseUrl/audit-log?userId=$userId');
     final response = await http.get(uri).timeout(const Duration(seconds: 15));
+
     _checkStatus(response);
     final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
     return data

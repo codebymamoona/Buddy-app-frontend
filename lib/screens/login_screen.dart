@@ -36,6 +36,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final userId = _userIdCtrl.text.trim();
+      final password = _passwordCtrl.text;
+
+      // The real Spring Boot POST request
+      await _api.login(userId, password);
 
       if (!mounted) return;
       setState(() => _loading = false);
@@ -46,7 +50,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Login failed: $e';
+        _error = 'Login failed: Incorrect User ID or Password.';
       });
     }
   }

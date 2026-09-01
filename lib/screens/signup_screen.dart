@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/buddy_api_service.dart';
 
 class SignupScreen extends StatefulWidget {
   final void Function(String userId) onSignupSuccess;
@@ -31,16 +32,31 @@ class _SignupScreenState extends State<SignupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    // TODO: Replace this mock delay with a real POST /api/auth/signup
-    // to your Spring Boot backend to insert the new user into PostgreSQL.
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      // 🚨 THE REAL SPRING BOOT API CALL 🚨
+      await BuddyApiService().signup(
+          _userIdCtrl.text.trim(),
+          _nameCtrl.text.trim(),
+          _passwordCtrl.text
+      );
 
-    if (!mounted) return;
-    setState(() => _loading = false);
+      if (!mounted) return;
+      setState(() => _loading = false);
 
-    // Pass the newly created User ID straight into the session
-    widget.onSignupSuccess(_userIdCtrl.text.trim());
-    Navigator.of(context).pop();
+      // Pass the newly created User ID straight into the session
+      widget.onSignupSuccess(_userIdCtrl.text.trim());
+      Navigator.of(context).pop();
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        // Fail loudly if the backend rejects the signup (e.g. ID taken or DB crash)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Signup Failed: $e'), backgroundColor: Colors.red),
+        );
+      });
+    }
   }
 
   @override
