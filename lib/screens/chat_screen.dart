@@ -10,12 +10,12 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+// 🚨 ADDED WidgetsBindingObserver TO LISTEN TO OS LIFECYCLE 🚨
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scroll = ScrollController();
   bool _buddyTyping = false;
 
-  // 1. Initialize the polling service for your test user
   late final PendingActionService _actionService;
 
   final List<ChatMessage> _messages = [
@@ -28,6 +28,9 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    // 🚨 REGISTER THE OBSERVER
+    WidgetsBinding.instance.addObserver(this);
+
     _actionService = PendingActionService(
       userId: "aqil_01",
       onNewActionDetected: _showReceiptBottomSheet,
@@ -37,13 +40,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    // 🚨 CLEAN UP THE OBSERVER
+    WidgetsBinding.instance.removeObserver(this);
+
     _controller.dispose();
     _scroll.dispose();
     _actionService.stopPolling();
     super.dispose();
   }
 
-  // 2. The Real Backend Chat Request
+  // 🚨 THE LIFECYCLE ROUTER: KILLS THE ZOMBIE TIMER 🚨
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print("📱 APP IN FOREGROUND: Waking up background poller");
+      _actionService.startPolling();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      print("💤 APP IN BACKGROUND: Suspending poller to save battery");
+      _actionService.stopPolling();
+    }
+  }
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
@@ -57,7 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://10.0.0.1:8080/api/chat'),
+        Uri.parse('http://127.0.0.1:8080/api/chat'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           "userId": "aqil_01",
@@ -86,7 +103,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // 3. The Dynamic Receipt Pop-Up
   void _showReceiptBottomSheet(Map<String, dynamic> action) {
     showModalBottomSheet(
       context: context,
@@ -96,7 +112,6 @@ class _ChatScreenState extends State<ChatScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        // Parse the secure payload your Java backend drafted
         Map<String, dynamic> payloadDetails = jsonDecode(action['payload']);
 
         return Padding(
@@ -105,15 +120,14 @@ class _ChatScreenState extends State<ChatScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 "Pending Approval",
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               Text("Type: ${action['toolName']}", style: const TextStyle(color: Colors.grey)),
               const SizedBox(height: 8),
 
-              // Dynamically display payload details
               ...payloadDetails.entries.map((e) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: Text("${e.key.toUpperCase()}: ${e.value}", style: const TextStyle(fontSize: 16)),
@@ -208,7 +222,7 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 // ==========================================
-// INTERNAL CLASSES (To fix your import errors)
+// INTERNAL CLASSES
 // ==========================================
 
 class ChatMessage {
@@ -330,7 +344,6 @@ class PendingActionService {
       return response.statusCode == 200;
     } catch (e) {
       print("❌ NETWORK CRASH: $e");
-      // DO NOT restart polling if it's a hard network crash, to prevent the infinite loop
       return false;
     }
   }

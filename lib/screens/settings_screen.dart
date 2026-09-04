@@ -1,122 +1,88 @@
 import 'package:flutter/material.dart';
-import '../models/app_state.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
 
 class SettingsScreen extends StatelessWidget {
-const SettingsScreen({super.key});
+  const SettingsScreen({super.key});
 
-@override
-Widget build(BuildContext context) {
-return Scaffold(
-appBar: const BuddyAppBar(title: 'Settings'),
-body: ListView(
-padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-children: [
-Center(
-child: Column(
-children: [
-Image.asset('assets/images/logo_transparent.png', height: 96),
-const SizedBox(height: 10),
-const Text('Buddy AI Agent', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-const Text('Your AI buddy for every important moment.',
-style: TextStyle(color: AppColors.grey, fontSize: 12.5), textAlign: TextAlign.center),
-],
-),
-),
-const SizedBox(height: 26),
-FormCard(
-children: [
-const SectionHeader(icon: Icons.account_balance_wallet_outlined, title: 'Spending controls'),
-const SizedBox(height: 14),
-_SettingRow(label: 'Monthly cap (Rs)', value: AppState.instance.monthlyCap.toStringAsFixed(0)),
-const Divider(height: 26),
-const _SettingRow(label: 'Require approval above', value: 'Rs 200'),
-const Divider(height: 26),
-_SwitchRow(label: 'Auto-approve small orders'),
-],
-),
-const SizedBox(height: 18),
-FormCard(
-children: [
-const SectionHeader(icon: Icons.notifications_outlined, title: 'Notifications'),
-const SizedBox(height: 14),
-_SwitchRow(label: 'Push notifications', initial: true),
-const Divider(height: 26),
-_SwitchRow(label: 'Birthday reminders', initial: true),
-],
-),
-const SizedBox(height: 18),
-FormCard(
-children: [
-const SectionHeader(icon: Icons.palette_outlined, title: 'Appearance'),
-const SizedBox(height: 14),
-Row(
-mainAxisAlignment: MainAxisAlignment.spaceBetween,
-children: [
-const Text('Dark theme', style: TextStyle(fontSize: 14)),
-Row(
-children: [
-Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 18),
-const SizedBox(width: 6),
-const Text('Always on', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
-],
-),
-],
-),
-],
-),
-],
-),
-);
-}
-}
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: const Text('System Settings'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: Colors.white,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Center(
+            child: Column(
+              children: [
+                Icon(Icons.admin_panel_settings_rounded, color: AppColors.primary, size: 64),
+                SizedBox(height: 12),
+                Text('Buddy AI Core', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Colors.white)),
+                Text('Zero-Trust Architecture v1.0', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+          _buildConfigCard(
+            title: 'Security Controls',
+            icon: Icons.security_rounded,
+            children: [
+              _buildSettingRow('Approval Threshold', 'PKR 0 (All Orders)'),
+              const Divider(color: AppColors.border),
+              _buildSettingRow('Action Expiry', '15 Minutes'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildConfigCard(
+            title: 'Backend Connection',
+            icon: Icons.dns_rounded,
+            children: [
+              _buildSettingRow('Host TCP Tunnel', '127.0.0.1:8080'),
+              const Divider(color: AppColors.border),
+              _buildSettingRow('Database Sync', 'Live (PostgreSQL)'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-class _SettingRow extends StatelessWidget {
-final String label;
-final String value;
-const _SettingRow({required this.label, required this.value});
+  Widget _buildConfigCard({required String title, required IconData icon, required List<Widget> children}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: AppColors.textSecondary, size: 20),
+              const SizedBox(width: 12),
+              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...children,
+        ],
+      ),
+    );
+  }
 
-@override
-Widget build(BuildContext context) {
-return Row(
-mainAxisAlignment: MainAxisAlignment.spaceBetween,
-children: [
-Text(label, style: const TextStyle(fontSize: 14)),
-Text(value, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primaryRed)),
-],
-);
-}
-}
-
-class _SwitchRow extends StatefulWidget {
-final String label;
-final bool initial;
-final ValueChanged<bool>? onChanged;
-const _SwitchRow({required this.label, this.initial = false, this.onChanged});
-
-@override
-State<_SwitchRow> createState() => _SwitchRowState();
-}
-
-class _SwitchRowState extends State<_SwitchRow> {
-late bool value = widget.initial;
-
-@override
-Widget build(BuildContext context) {
-return Row(
-mainAxisAlignment: MainAxisAlignment.spaceBetween,
-children: [
-Text(widget.label, style: const TextStyle(fontSize: 14)),
-Switch(
-value: value,
-activeColor: AppColors.primaryRed,
-onChanged: (v) {
-setState(() => value = v);
-widget.onChanged?.call(v);
-},
-),
-],
-);
-}
+  Widget _buildSettingRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        Text(value, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+      ],
+    );
+  }
 }

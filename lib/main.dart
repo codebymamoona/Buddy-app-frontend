@@ -554,19 +554,11 @@ class _HomeTabsState extends State<HomeTabs> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      const ChatScreen(), // 1. Your working Zero-Trust Chat
-
-      // 2. Bypassing broken teammate Approval Screen
-      const Scaffold(body: Center(child: Text('Approval Screen Offline for Testing'))),
-
-      // 3. Friend Profile (Assuming this isn't broken)
-      const FriendProfileScreen(),
-
-      // 4. Bypassing broken teammate Audit Screen
-      const Scaffold(body: Center(child: Text('Audit Trail Offline for Testing'))),
-
-      // 5. Bypassing broken teammate Settings Screen
-      const Scaffold(body: Center(child: Text('Settings Offline for Testing'))),
+      const ChatScreen(),
+      const ApprovalScreen(), // RESTORED
+      const Scaffold(body: Center(child: Text('Friend Profile Offline'))),
+      const AuditTrailScreen(), // RESTORED
+      const Scaffold(body: Center(child: Text('Settings Offline'))),
     ];
 
     // Clear pending quick message after injecting it to prevent repeated calls
