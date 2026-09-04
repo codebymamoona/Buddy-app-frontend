@@ -1,25 +1,25 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Red Accents
-  static const primary = Color(0xFFE50914); // Vibrant Crimson Red
-  static const primaryDark = Color(0xFFB81D24);
+  // --- MISSING FALLBACKS FOR SECONDARY SCREENS ---
+  static const Color white = Colors.white;
+  static const Color grey = Colors.grey;
+  static const Color primaryRed = Colors.redAccent;
+  static const Color pureBlack = Colors.black;
+  static const Gradient redGradient = LinearGradient(colors: [Colors.redAccent, Colors.red]);
 
-  // Status Colors
+  // --- YOUR EXISTING THEME COLORS ---
+  static const primary = Color(0xFFE50914);
+  static const primaryDark = Color(0xFFB81D24);
   static const success = Color(0xFF1DB876);
   static const danger = Color(0xFFFF4D4D);
   static const warning = Color(0xFFF5A623);
-
-  // Dark Theme Backgrounds & Surfaces
-  static const bg = Color(0xFF0F0F12);        // Deep Charcoal / Near-Black
-  static const surface = Color(0xFF18181C);   // Card Surface Black
-  static const inputBg = Color(0xFF222228);   // Input Fill Dark Grey
-
-  // Typography & Borders
+  static const bg = Color(0xFF0F0F12);
+  static const surface = Color(0xFF18181C);
+  static const inputBg = Color(0xFF222228);
   static const textPrimary = Color(0xFFFFFFFF);
   static const textSecondary = Color(0xFFA0A0AB);
   static const border = Color(0xFF2C2C35);
-
   static Color? get ink => null;
 }
 

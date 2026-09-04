@@ -1,118 +1,133 @@
-"Audit_screen"
-
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import '../models/app_state.dart';
-import '../models/approval.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
 
-class AuditScreen extends StatefulWidget {
-const AuditScreen({super.key});
+class AuditTrailScreen extends StatefulWidget {
+  const AuditTrailScreen({super.key});
 
-@override
-State<AuditScreen> createState() => _AuditScreenState();
+  @override
+  State<AuditTrailScreen> createState() => _AuditTrailScreenState();
 }
 
-class _AuditScreenState extends State<AuditScreen> {
-final AppState _state = AppState.instance;
+class _AuditTrailScreenState extends State<AuditTrailScreen> {
+  List<dynamic> _auditLogs = [];
+  bool _isLoading = true;
 
-@override
-void initState() {
-super.initState();
-_state.addListener(_refresh);
-}
+  @override
+  void initState() {
+    super.initState();
+    _fetchAuditLogs();
+  }
 
-@override
-void dispose() {
-_state.removeListener(_refresh);
-super.dispose();
-}
+  // 1. FETCH IMMUTABLE AUDIT LOGS FROM POSTGRESQL
+  Future<void> _fetchAuditLogs() async {
+    setState(() => _isLoading = true);
+    try {
+      // Note: Make sure your Java backend has a GET endpoint for this route!
+      final response = await http.get(Uri.parse('http://10.0.2.2:8080/api/actions/audit/aqil_01'));
 
-void _refresh() => setState(() {});
+      if (response.statusCode == 200) {
+        setState(() {
+          _auditLogs = jsonDecode(response.body);
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      print("AUDIT FETCH ERROR: $e");
+      setState(() => _isLoading = false);
+    }
+  }
 
-@override
-Widget build(BuildContext context) {
-final items = _state.activity;
-return Scaffold(
-appBar: const BuddyAppBar(title: 'Activity Log', trailing: UserAvatar()),
-body: items.isEmpty
-? const Center(child: Text('No activity yet', style: TextStyle(color: AppColors.grey)))
-    : ListView.separated(
-padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-itemCount: items.length,
-separatorBuilder: (_, __) => const SizedBox(height: 12),
-itemBuilder: (context, i) => _ActivityTile(entry: items[i], delay: i),
-),
-);
-}
-}
+  String _formatTime(String rawIsoDate) {
+    try {
+      final t = DateTime.parse(rawIsoDate).toLocal();
+      final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+      final m = t.minute.toString().padLeft(2, '0');
+      final ampm = t.hour >= 12 ? 'PM' : 'AM';
+      return '${t.month}/${t.day} · $h:$m $ampm';
+    } catch (e) {
+      return "Unknown Time";
+    }
+  }
 
-class _ActivityTile extends StatelessWidget {
-final ActivityEntry entry;
-final int delay;
-const _ActivityTile({required this.entry, required this.delay});
+  // Visual helper to map Database event types to UI
+  ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
+    switch (eventType.toUpperCase()) {
+      case "REJECTED":
+        return (icon: Icons.block_rounded, color: AppColors.danger, label: 'Blocked by User');
+      case "APPROVED":
+        return (icon: Icons.verified_rounded, color: AppColors.success, label: 'Authorized');
+      case "DRAFTED":
+      default:
+        return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'AI Drafted Order');
+    }
+  }
 
-({IconData icon, Color color, String label}) get _visual {
-switch (entry.kind) {
-case ActivityKind.denied:
-return (icon: Icons.close_rounded, color: AppColors.danger, label: 'Denied');
-case ActivityKind.approved:
-return (icon: Icons.check_rounded, color: AppColors.success, label: 'Approved');
-case ActivityKind.orderPlaced:
-return (icon: Icons.storefront_rounded, color: AppColors.primaryRed, label: 'Order placed');
-}
-}
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _auditLogs.isEmpty
+          ? const Center(child: Text('No audit records found.', style: TextStyle(color: AppColors.textSecondary)))
+          : RefreshIndicator(
+        onRefresh: _fetchAuditLogs,
+        child: ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: _auditLogs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final log = _auditLogs[index];
+            final v = _getVisualConfig(log['eventType'] ?? 'DRAFTED');
 
-String _formatTime(DateTime t) {
-final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
-final m = t.minute.toString().padLeft(2, '0');
-final ampm = t.hour >= 12 ? 'PM' : 'AM';
-return '${t.month}/${t.day} · $h:$m $ampm';
-}
-
-@override
-Widget build(BuildContext context) {
-final v = _visual;
-return TweenAnimationBuilder<double>(
-tween: Tween(begin: 0, end: 1),
-duration: Duration(milliseconds: 380 + delay * 60),
-curve: Curves.easeOutCubic,
-builder: (context, t, child) => Opacity(
-opacity: t,
-child: Transform.translate(offset: Offset((1 - t) * 24, 0), child: child),
-),
-child: Container(
-padding: const EdgeInsets.all(16),
-decoration: BoxDecoration(
-color: AppColors.white,
-borderRadius: BorderRadius.circular(18),
-boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4))],
-),
-child: Row(
-children: [
-Container(
-width: 42,
-height: 42,
-decoration: BoxDecoration(color: v.color.withOpacity(0.12), shape: BoxShape.circle),
-child: Icon(v.icon, color: v.color, size: 20),
-),
-const SizedBox(width: 14),
-Expanded(
-child: Column(
-crossAxisAlignment: CrossAxisAlignment.start,
-children: [
-Text(v.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
-const SizedBox(height: 2),
-Text(entry.title, style: const TextStyle(color: AppColors.grey, fontSize: 13)),
-const SizedBox(height: 2),
-Text(_formatTime(entry.time), style: const TextStyle(color: Color(0xFFB6B6BA), fontSize: 11.5)),
-],
-),
-),
-Icon(Icons.verified_rounded, color: AppColors.success, size: 20),
-],
-),
-),
-);
-}
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: v.color.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(v.icon, color: v.color, size: 22),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(v.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                        const SizedBox(height: 4),
+                        // Render the raw JSON details the AI produced
+                        Text(
+                          log['detailsJson'] ?? 'No payload data',
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _formatTime(log['createdAt'] ?? ''),
+                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }

@@ -1,277 +1,337 @@
-"chat_screen"
-
+import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import '../models/app_state.dart';
-import '../models/chat_message.dart';
-import '../theme/app_theme.dart';
-import '../widgets/animated_logo.dart';
-import '../widgets/common.dart';
+import 'package:http/http.dart' as http;
 
 class ChatScreen extends StatefulWidget {
-const ChatScreen({super.key});
+  const ChatScreen({super.key});
 
-@override
-State<ChatScreen> createState() => _ChatScreenState();
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-final TextEditingController _controller = TextEditingController();
-final ScrollController _scroll = ScrollController();
-bool _buddyTyping = false;
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  bool _buddyTyping = false;
 
-final List<ChatMessage> _messages = [
-ChatMessage(
-fromBuddy: true,
-text: "Hi, I'm Buddy. I can order food or suggest gifts for your friends. What do you need?",
-),
-];
+  // 1. Initialize the polling service for your test user
+  late final PendingActionService _actionService;
 
-void _send([String? preset]) {
-final text = preset ?? _controller.text.trim();
-if (text.isEmpty) return;
-setState(() {
-_messages.add(ChatMessage(text: text, fromBuddy: false));
-_controller.clear();
-_buddyTyping = true;
-});
-_scrollToBottom();
+  final List<ChatMessage> _messages = [
+    ChatMessage(
+      fromBuddy: true,
+      text: "System Secure. Zero-Trust Backend Online. I can handle food, clothing, and travel. What do you need?",
+    ),
+  ];
 
-Future.delayed(const Duration(milliseconds: 900), () {
-if (!mounted) return;
-String reply;
-final lower = text.toLowerCase();
-if (lower.contains('cake') || lower.contains('order') || lower.contains('birthday')) {
-reply = "Got it! I've sent a Rs 450 birthday cake order for Ayesha to your Approvals tab for confirmation 🎂";
-AppState.instance.requestApproval('Birthday cake order for Ayesha', 450);
-} else if (lower.contains('gift')) {
-reply = "Here are a couple of gift ideas — check the Gifts tab, I've queued a scented candle set for approval 🎁";
-} else {
-reply = "On it! I'll take care of that and let you know if I need your approval.";
-}
-setState(() {
-_buddyTyping = false;
-_messages.add(ChatMessage(text: reply, fromBuddy: true));
-});
-_scrollToBottom();
-});
+  @override
+  void initState() {
+    super.initState();
+    _actionService = PendingActionService(
+      userId: "aqil_01",
+      onNewActionDetected: _showReceiptBottomSheet,
+    );
+    _actionService.startPolling();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scroll.dispose();
+    _actionService.stopPolling();
+    super.dispose();
+  }
+
+  // 2. The Real Backend Chat Request
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() {
+      _messages.add(ChatMessage(text: text, fromBuddy: false));
+      _controller.clear();
+      _buddyTyping = true;
+    });
+    _scrollToBottom();
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.0.1:8080/api/chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "userId": "aqil_01",
+          "message": text
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _messages.add(ChatMessage(text: response.body, fromBuddy: true));
+        });
+      } else {
+        setState(() {
+          _messages.add(ChatMessage(text: "SYSTEM ERROR: ${response.statusCode}", fromBuddy: true));
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _messages.add(ChatMessage(text: "NETWORK ERROR: Cannot reach Spring Boot. Ensure it is running on port 8080.", fromBuddy: true));
+      });
+    } finally {
+      setState(() {
+        _buddyTyping = false;
+      });
+      _scrollToBottom();
+    }
+  }
+
+  // 3. The Dynamic Receipt Pop-Up
+  void _showReceiptBottomSheet(Map<String, dynamic> action) {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        // Parse the secure payload your Java backend drafted
+        Map<String, dynamic> payloadDetails = jsonDecode(action['payload']);
+
+        return Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Pending Approval",
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text("Type: ${action['toolName']}", style: const TextStyle(color: Colors.grey)),
+              const SizedBox(height: 8),
+
+              // Dynamically display payload details
+              ...payloadDetails.entries.map((e) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Text("${e.key.toUpperCase()}: ${e.value}", style: const TextStyle(fontSize: 16)),
+              )),
+
+              const Divider(height: 32, thickness: 2),
+              Text(
+                "Total Deduction: PKR ${action['cost']}",
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        await _actionService.submitDecision(action['id'], "REJECT");
+                      },
+                      child: const Text("Reject"),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        bool success = await _actionService.submitDecision(action['id'], "APPROVE");
+                        if (success) {
+                          setState(() {
+                            _messages.add(ChatMessage(text: "TRANSACTION SUCCESSFUL. Wallet Deducted.", fromBuddy: true));
+                          });
+                          _scrollToBottom();
+                        }
+                      },
+                      child: const Text("Approve", style: TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                ],
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!_scroll.hasClients) return;
+      _scroll.animateTo(_scroll.position.maxScrollExtent + 120,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Buddy AI Assistant'),
+        backgroundColor: Colors.blueAccent,
+        foregroundColor: Colors.white,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length + (_buddyTyping ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (index == _messages.length) {
+                  return const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text("Buddy is thinking...", style: TextStyle(color: Colors.grey)),
+                    ),
+                  );
+                }
+                final m = _messages[index];
+                return _MessageBubble(message: m);
+              },
+            ),
+          ),
+          _Composer(controller: _controller, onSend: _send),
+        ],
+      ),
+    );
+  }
 }
 
-void _scrollToBottom() {
-Future.delayed(const Duration(milliseconds: 80), () {
-if (!_scroll.hasClients) return;
-_scroll.animateTo(_scroll.position.maxScrollExtent + 120,
-duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
-});
-}
+// ==========================================
+// INTERNAL CLASSES (To fix your import errors)
+// ==========================================
 
-@override
-void dispose() {
-_controller.dispose();
-_scroll.dispose();
-super.dispose();
-}
-
-@override
-Widget build(BuildContext context) {
-return Scaffold(
-appBar: const BuddyAppBar(title: 'Buddy AI Assistant', trailing: UserAvatar()),
-body: Column(
-children: [
-Expanded(
-child: ListView.builder(
-controller: _scroll,
-padding: const EdgeInsets.all(16),
-itemCount: _messages.length + (_buddyTyping ? 1 : 0),
-itemBuilder: (context, index) {
-if (index == _messages.length) {
-return const _TypingBubble();
-}
-final m = _messages[index];
-return TweenAnimationBuilder<double>(
-tween: Tween(begin: 0, end: 1),
-duration: const Duration(milliseconds: 320),
-curve: Curves.easeOutCubic,
-builder: (context, t, child) => Opacity(
-opacity: t,
-child: Transform.translate(offset: Offset(0, (1 - t) * 12), child: child),
-),
-child: _MessageBubble(message: m),
-);
-},
-),
-),
-_QuickChips(onTap: _send),
-_Composer(controller: _controller, onSend: () => _send()),
-],
-),
-);
-}
+class ChatMessage {
+  final String text;
+  final bool fromBuddy;
+  ChatMessage({required this.text, required this.fromBuddy});
 }
 
 class _MessageBubble extends StatelessWidget {
-final ChatMessage message;
-const _MessageBubble({required this.message});
+  final ChatMessage message;
+  const _MessageBubble({required this.message});
 
-@override
-Widget build(BuildContext context) {
-final isBuddy = message.fromBuddy;
-return Padding(
-padding: const EdgeInsets.symmetric(vertical: 6),
-child: Row(
-mainAxisAlignment: isBuddy ? MainAxisAlignment.start : MainAxisAlignment.end,
-crossAxisAlignment: CrossAxisAlignment.end,
-children: [
-if (isBuddy) ...[
-Container(
-width: 30,
-height: 30,
-margin: const EdgeInsets.only(right: 8),
-decoration: const BoxDecoration(color: AppColors.primaryRed, shape: BoxShape.circle),
-child: const Icon(Icons.smart_toy_rounded, color: Colors.white, size: 16),
-),
-],
-Flexible(
-child: Container(
-padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-decoration: BoxDecoration(
-color: isBuddy ? AppColors.surface : AppColors.primary,
-borderRadius: BorderRadius.only(
-topLeft: const Radius.circular(18),
-topRight: const Radius.circular(18),
-bottomLeft: Radius.circular(isBuddy ? 4 : 18),
-bottomRight: Radius.circular(isBuddy ? 18 : 4),
-),
-boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-),
-child: Text(
-message.text,
-style: TextStyle(color: isBuddy ? AppColors.pureBlack : Colors.white, fontSize: 14.5, height: 1.35),
-),
-),
-),
-],
-),
-);
-}
-}
-
-class _TypingBubble extends StatefulWidget {
-const _TypingBubble();
-@override
-State<_TypingBubble> createState() => _TypingBubbleState();
-}
-
-class _TypingBubbleState extends State<_TypingBubble> with SingleTickerProviderStateMixin {
-late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
-
-@override
-void dispose() {
-_c.dispose();
-super.dispose();
-}
-
-@override
-Widget build(BuildContext context) {
-return Align(
-alignment: Alignment.centerLeft,
-child: Container(
-margin: const EdgeInsets.symmetric(vertical: 6),
-padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(18)),
-child: Row(
-mainAxisSize: MainAxisSize.min,
-children: List.generate(3, (i) {
-return AnimatedBuilder(
-animation: _c,
-builder: (context, _) {
-final v = ((_c.value + i * 0.2) % 1.0);
-final scale = 0.6 + 0.4 * (1 - (v - 0.5).abs() * 2).clamp(0.0, 1.0);
-return Padding(
-padding: const EdgeInsets.symmetric(horizontal: 2),
-child: Transform.scale(
-scale: scale,
-child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: AppColors.grey, shape: BoxShape.circle)),
-),
-);
-},
-);
-}),
-),
-),
-);
-}
-}
-
-class _QuickChips extends StatelessWidget {
-final ValueChanged<String> onTap;
-const _QuickChips({required this.onTap});
-
-@override
-Widget build(BuildContext context) {
-const suggestions = ['Order a birthday cake', 'Suggest a gift', 'Remind me tomorrow'];
-return SizedBox(
-height: 44,
-child: ListView.separated(
-scrollDirection: Axis.horizontal,
-padding: const EdgeInsets.symmetric(horizontal: 16),
-itemCount: suggestions.length,
-separatorBuilder: (_, __) => const SizedBox(width: 8),
-itemBuilder: (context, i) {
-return ReactiveButton(
-onTap: () => onTap(suggestions[i]),
-child: Container(
-padding: const EdgeInsets.symmetric(horizontal: 14),
-alignment: Alignment.center,
-decoration: BoxDecoration(
-color: AppColors.white,
-borderRadius: BorderRadius.circular(30),
-border: Border.all(color: AppColors.border),
-),
-child: Text(suggestions[i], style: const TextStyle(fontSize: 13, color: AppColors.pureBlack)),
-),
-);
-},
-),
-);
-}
+  @override
+  Widget build(BuildContext context) {
+    final isBuddy = message.fromBuddy;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: isBuddy ? MainAxisAlignment.start : MainAxisAlignment.end,
+        children: [
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isBuddy ? Colors.grey[200] : Colors.blueAccent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                message.text,
+                style: TextStyle(color: isBuddy ? Colors.black87 : Colors.white, fontSize: 15),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Composer extends StatelessWidget {
-final TextEditingController controller;
-final VoidCallback onSend;
-const _Composer({required this.controller, required this.onSend});
+  final TextEditingController controller;
+  final VoidCallback onSend;
+  const _Composer({required this.controller, required this.onSend});
 
-@override
-Widget build(BuildContext context) {
-return SafeArea(
-top: false,
-child: Padding(
-padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-child: Row(
-children: [
-const AnimatedBuddyLogo(size: 30),
-const SizedBox(width: 10),
-Expanded(
-child: TextField(
-controller: controller,
-onSubmitted: (_) => onSend(),
-decoration: const InputDecoration(hintText: 'Message Buddy...'),
-),
-),
-const SizedBox(width: 10),
-ReactiveButton(
-onTap: onSend,
-borderRadius: BorderRadius.circular(30),
-child: Container(
-width: 46,
-height: 46,
-decoration: const BoxDecoration(gradient: AppColors.redGradient, shape: BoxShape.circle),
-child: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
-),
-),
-],
-),
-),
-);
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: 'Message Buddy...',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                ),
+                onSubmitted: (_) => onSend(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.send, color: Colors.blueAccent),
+              onPressed: onSend,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
+
+class PendingActionService {
+  final String baseUrl = "http://127.0.0.1:8080/api/actions";
+  final String userId;
+  Timer? _pollingTimer;
+  Function(Map<String, dynamic>)? onNewActionDetected;
+
+  PendingActionService({required this.userId, this.onNewActionDetected});
+
+  void startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      try {
+        final response = await http.get(Uri.parse('$baseUrl/pending/$userId'));
+        if (response.statusCode == 200) {
+          List<dynamic> actions = jsonDecode(response.body);
+          if (actions.isNotEmpty && onNewActionDetected != null) {
+            stopPolling();
+            onNewActionDetected!(actions.first);
+          }
+        }
+      } catch (e) {
+        // Silently fail if backend is unreachable during polling
+      }
+    });
+  }
+
+  void stopPolling() {
+    _pollingTimer?.cancel();
+  }
+
+  Future<bool> submitDecision(int actionId, String decision) async {
+    print("🚀 ATTEMPTING TO SEND DECISION: $decision FOR ID: $actionId");
+    print("🔗 ENDPOINT: $baseUrl/$actionId/decision");
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/$actionId/decision'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"userId": userId, "decision": decision}),
+      );
+
+      print("📥 BACKEND STATUS CODE: ${response.statusCode}");
+      print("📥 BACKEND RESPONSE: ${response.body}");
+
+      startPolling();
+      return response.statusCode == 200;
+    } catch (e) {
+      print("❌ NETWORK CRASH: $e");
+      // DO NOT restart polling if it's a hard network crash, to prevent the infinite loop
+      return false;
+    }
+  }
 }

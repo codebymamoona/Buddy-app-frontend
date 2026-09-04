@@ -1,5 +1,3 @@
-"settings_screen"
-
 import 'package:flutter/material.dart';
 import '../models/app_state.dart';
 import '../theme/app_theme.dart';

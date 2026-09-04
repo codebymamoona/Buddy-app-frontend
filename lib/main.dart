@@ -547,44 +547,26 @@ class _HomeTabsState extends State<HomeTabs> {
 
   void _openSpendingCapScreen() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Spending Cap')),
-        body: SpendingCapSettingsScreen(
-          initialCap: _capLimit,
-          onSave: (v) {
-            _handleSaveCap(v);
-            Navigator.of(context).pop();
-          },
-        ),
-      ),
+      builder: (_) => const SpendingCapScreen(),
     ));
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-      ChatScreen(
-        initialMessage: _pendingQuickReplyMessage, // Pass incoming quick reply
-        onPurchaseIntent: _handleChatPurchaseIntent,
-        // onGiftIntent: () => setState(() => _index = 4),
-        userId: widget.userEmail, // <-- FIXED: Injected the logged-in user ID
-      ),
-      ApprovalScreen(
-        itemDescription: _pendingItem,
-        amount: _pendingAmount,
-        cap: SpendingCap(limit: _capLimit, used: _capUsed),
-        onApprove: _handleApprove,
-        onDeny: _handleDeny,
-      ),
+      const ChatScreen(), // 1. Your working Zero-Trust Chat
+
+      // 2. Bypassing broken teammate Approval Screen
+      const Scaffold(body: Center(child: Text('Approval Screen Offline for Testing'))),
+
+      // 3. Friend Profile (Assuming this isn't broken)
       const FriendProfileScreen(),
-      AuditTrailScreen(entries: _auditEntries),
-      // GiftRecommendationScreen(
-      //     friendName: 'Ayesha', ideas: _giftIdeas, onOrder: _handleOrderGift),
-      SettingsScreen(
-        userEmail: widget.userEmail,
-        onLogout: widget.onLogout,
-        onOpenSpendingCap: _openSpendingCapScreen,
-      ),
+
+      // 4. Bypassing broken teammate Audit Screen
+      const Scaffold(body: Center(child: Text('Audit Trail Offline for Testing'))),
+
+      // 5. Bypassing broken teammate Settings Screen
+      const Scaffold(body: Center(child: Text('Settings Offline for Testing'))),
     ];
 
     // Clear pending quick message after injecting it to prevent repeated calls
