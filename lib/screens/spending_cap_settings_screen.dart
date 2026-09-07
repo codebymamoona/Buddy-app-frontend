@@ -1,113 +1,165 @@
 import 'package:flutter/material.dart';
-import '../models/app_state.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
 
 class SpendingCapScreen extends StatefulWidget {
-  const SpendingCapScreen({super.key});
+  final String userId; // Pass this from your auth state
+
+  const SpendingCapScreen({super.key, required this.userId});
 
   @override
   State<SpendingCapScreen> createState() => _SpendingCapScreenState();
 }
 
 class _SpendingCapScreenState extends State<SpendingCapScreen> {
-  final AppState _state = AppState.instance;
+  // 🚨 Default UI values. In a full implementation, you fetch these via GET request in initState
+  double _monthlyCap = 5000;
+  double _threshold = 200;
+  bool _autoApprove = false;
 
-  late double _monthlyCap = _state.monthlyCap;
-  late double _threshold = _state.approvalThreshold;
-  late bool _autoApprove = _state.autoApproveSmall;
-  late final Map<String, double> _categoryDraft = Map.of(_state.categoryCaps);
+  final Map<String, double> _categoryDraft = {
+    'Food': 2000,
+    'Clothing': 2000,
+    'Travel': 1000,
+  };
 
-  void _save() {
-    _state.updateMonthlyCap(_monthlyCap);
-    _state.updateApprovalThreshold(_threshold);
-    _state.setAutoApproveSmall(_autoApprove);
-    for (final entry in _categoryDraft.entries) {
-      _state.updateCategoryCap(entry.key, entry.value);
+  bool _isSaving = false;
+
+  Future<void> _saveToVault() async {
+    setState(() => _isSaving = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8080/api/settings/spending-cap'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "userId": widget.userId,
+          "monthlyCap": _monthlyCap,
+          "autoApproveThreshold": _autoApprove ? _threshold : 0.0,
+          "categoryCaps": _categoryDraft,
+        }),
+      );
+
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SECURITY PROTOCOL: Caps locked in PostgreSQL vault.'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.of(context).maybePop();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${response.body}'), backgroundColor: AppColors.danger),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Network Error: Cannot reach Zero-Trust backend.'),
+            backgroundColor: AppColors.danger
+        ),
+      );
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Spending cap settings saved.')),
-    );
-    Navigator.of(context).maybePop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalSpent = _state.spent;
+    // Mock spent value for UI preview - backend should calculate real spend
+    const double totalSpent = 1200.0;
     final ratio = _monthlyCap <= 0 ? 0.0 : (totalSpent / _monthlyCap).clamp(0.0, 1.0).toDouble();
 
     return Scaffold(
-      appBar: const BuddyAppBar(title: 'Spending Cap'),
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text('Spending Controls', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+      ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
           // ---- Overall monthly cap ----
-          FormCard(
+          _buildConfigCard(
+            title: 'Global Monthly Cap',
+            icon: Icons.account_balance_wallet_outlined,
             children: [
-              const SectionHeader(icon: Icons.account_balance_wallet_outlined, title: 'Monthly cap'),
-              const SizedBox(height: 14),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Rs ${totalSpent.toStringAsFixed(0)} spent', style: const TextStyle(color: AppColors.grey, fontSize: 12.5)),
-                  Text('Rs ${_monthlyCap.toStringAsFixed(0)} cap',
-                      style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 12.5)),
+                  const Text('PKR 1200 spent', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                  Text('PKR ${_monthlyCap.toStringAsFixed(0)} cap',
+                      style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13)),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: LinearProgressIndicator(
                   value: ratio,
-                  minHeight: 9,
+                  minHeight: 8,
                   backgroundColor: AppColors.border,
                   valueColor: const AlwaysStoppedAnimation(AppColors.primary),
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 24),
               Slider(
                 value: _monthlyCap,
                 min: 500,
-                max: 10000,
-                divisions: 19,
+                max: 20000,
+                divisions: 39,
                 activeColor: AppColors.primary,
-                label: 'Rs ${_monthlyCap.toStringAsFixed(0)}',
+                inactiveColor: AppColors.border,
+                label: 'PKR ${_monthlyCap.toStringAsFixed(0)}',
                 onChanged: (v) => setState(() => _monthlyCap = v),
               ),
               const Align(
                 alignment: Alignment.center,
-                child: Text('Drag to set Buddy\'s total monthly budget', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                child: Text('Drag to set AI total monthly budget', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
               ),
             ],
           ),
           const SizedBox(height: 18),
 
           // ---- Approval rules ----
-          FormCard(
+          _buildConfigCard(
+            title: 'Zero-Trust Rules',
+            icon: Icons.rule_rounded,
             children: [
-              const SectionHeader(icon: Icons.rule_rounded, title: 'Approval rules'),
-              const SizedBox(height: 14),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Auto-approve small orders', style: TextStyle(fontSize: 14)),
+                  const Text('Auto-approve micro-orders', style: TextStyle(color: Colors.white, fontSize: 14)),
                   Switch(
                     value: _autoApprove,
                     activeColor: AppColors.primary,
+                    inactiveTrackColor: AppColors.border,
                     onChanged: (v) => setState(() => _autoApprove = v),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 _autoApprove
-                    ? 'Orders up to Rs ${_threshold.toStringAsFixed(0)} go through instantly — everything above still needs your approval.'
-                    : 'Every order Buddy wants to place will wait for your approval, regardless of amount.',
-                style: const TextStyle(color: AppColors.grey, fontSize: 12),
+                    ? 'Orders up to PKR ${_threshold.toStringAsFixed(0)} bypass manual approval.'
+                    : 'Every single AI transaction requires your explicit authorization.',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
               ),
               const SizedBox(height: 16),
               Opacity(
-                opacity: _autoApprove ? 1 : 0.4,
+                opacity: _autoApprove ? 1 : 0.3,
                 child: IgnorePointer(
                   ignoring: !_autoApprove,
                   child: Column(
@@ -116,18 +168,19 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Require approval above', style: TextStyle(fontSize: 13.5)),
-                          Text('Rs ${_threshold.toStringAsFixed(0)}',
+                          const Text('Approval Threshold', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+                          Text('PKR ${_threshold.toStringAsFixed(0)}',
                               style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary)),
                         ],
                       ),
                       Slider(
-                        value: _threshold.clamp(50, 1000).toDouble(),
+                        value: _threshold.clamp(50, 5000).toDouble(),
                         min: 50,
-                        max: 1000,
-                        divisions: 19,
+                        max: 5000,
+                        divisions: 99,
                         activeColor: AppColors.primary,
-                        label: 'Rs ${_threshold.toStringAsFixed(0)}',
+                        inactiveColor: AppColors.border,
+                        label: 'PKR ${_threshold.toStringAsFixed(0)}',
                         onChanged: (v) => setState(() => _threshold = v),
                       ),
                     ],
@@ -139,21 +192,60 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
           const SizedBox(height: 18),
 
           // ---- Per-category caps ----
-          FormCard(
+          _buildConfigCard(
+            title: 'Category Firewalls',
+            icon: Icons.pie_chart_outline_rounded,
+            children: _categoryDraft.keys.map((category) => _CategoryCapRow(
+              category: category,
+              spent: category == 'Food' ? 700 : 0, // Mock spend for demo
+              cap: _categoryDraft[category]!,
+              onChanged: (v) => setState(() => _categoryDraft[category] = v),
+            )).toList(),
+          ),
+          const SizedBox(height: 28),
+
+          // ---- Save Button ----
+          SizedBox(
+            height: 52,
+            child: ElevatedButton(
+              onPressed: _isSaving ? null : _saveToVault,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              child: _isSaving
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text(
+                'ENFORCE LIMITS',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfigCard({required String title, required IconData icon, required List<Widget> children}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             children: [
-              const SectionHeader(icon: Icons.pie_chart_outline_rounded, title: 'Category caps'),
-              const SizedBox(height: 10),
-              ..._categoryDraft.keys.map((category) => _CategoryCapRow(
-                category: category,
-                spent: _state.categorySpent[category] ?? 0,
-                cap: _categoryDraft[category]!,
-                onChanged: (v) => setState(() => _categoryDraft[category] = v),
-              )),
+              Icon(icon, color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
             ],
           ),
-          const SizedBox(height: 24),
-
-          PrimaryButton(label: 'Save spending cap', icon: Icons.check_rounded, onPressed: _save),
+          const SizedBox(height: 16),
+          ...children,
         ],
       ),
     );
@@ -166,23 +258,14 @@ class _CategoryCapRow extends StatelessWidget {
   final double cap;
   final ValueChanged<double> onChanged;
 
-  const _CategoryCapRow({
-    required this.category,
-    required this.spent,
-    required this.cap,
-    required this.onChanged,
-  });
+  const _CategoryCapRow({required this.category, required this.spent, required this.cap, required this.onChanged});
 
   IconData get _icon {
     switch (category) {
-      case 'Food':
-        return Icons.restaurant_rounded;
-      case 'Gifts':
-        return Icons.card_giftcard_rounded;
-      case 'Travel':
-        return Icons.flight_takeoff_rounded;
-      default:
-        return Icons.category_rounded;
+      case 'Food': return Icons.restaurant_rounded;
+      case 'Clothing': return Icons.shopping_bag_rounded;
+      case 'Travel': return Icons.flight_takeoff_rounded;
+      default: return Icons.category_rounded;
     }
   }
 
@@ -192,44 +275,41 @@ class _CategoryCapRow extends StatelessWidget {
     final over = spent > cap;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(_icon, size: 18, color: AppColors.primary),
+              Icon(_icon, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 8),
-              Expanded(child: Text(category, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14))),
+              Expanded(child: Text(category, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14))),
               Text(
-                'Rs ${spent.toStringAsFixed(0)} / Rs ${cap.toStringAsFixed(0)}',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: over ? AppColors.danger : AppColors.grey,
-                ),
+                'PKR ${spent.toStringAsFixed(0)} / PKR ${cap.toStringAsFixed(0)}',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: over ? AppColors.danger : AppColors.textSecondary),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: LinearProgressIndicator(
               value: ratio,
-              minHeight: 7,
+              minHeight: 6,
               backgroundColor: AppColors.border,
               valueColor: AlwaysStoppedAnimation(over ? AppColors.danger : AppColors.primary),
             ),
           ),
           SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 2),
+            data: SliderTheme.of(context).copyWith(trackHeight: 2, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6)),
             child: Slider(
-              value: cap.clamp(100, 3000).toDouble(),
-              min: 100,
-              max: 3000,
-              divisions: 29,
+              value: cap.clamp(500, 10000).toDouble(),
+              min: 500,
+              max: 10000,
+              divisions: 19,
               activeColor: AppColors.primary,
-              label: 'Rs ${cap.toStringAsFixed(0)}',
+              inactiveColor: AppColors.border,
+              label: 'PKR ${cap.toStringAsFixed(0)}',
               onChanged: onChanged,
             ),
           ),

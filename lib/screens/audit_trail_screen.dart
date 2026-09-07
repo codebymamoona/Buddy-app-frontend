@@ -4,7 +4,9 @@ import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 
 class AuditTrailScreen extends StatefulWidget {
-  const AuditTrailScreen({super.key});
+  final String userId; // 🚨 ZERO-TRUST INJECTION
+
+  const AuditTrailScreen({super.key, required this.userId});
 
   @override
   State<AuditTrailScreen> createState() => _AuditTrailScreenState();
@@ -20,12 +22,11 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
     _fetchAuditLogs();
   }
 
-  // 1. FETCH IMMUTABLE AUDIT LOGS FROM POSTGRESQL
   Future<void> _fetchAuditLogs() async {
     setState(() => _isLoading = true);
     try {
-      // Note: Make sure your Java backend has a GET endpoint for this route!
-      final response = await http.get(Uri.parse('http://10.0.2.2:8080/api/actions/audit/aqil_01'));
+      // 🚨 SECURE TUNNEL + DYNAMIC ID
+      final response = await http.get(Uri.parse('http://127.0.0.1:8080/api/audit-log?userId=${widget.userId}'));
 
       if (response.statusCode == 200) {
         setState(() {
@@ -36,7 +37,6 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("AUDIT FETCH ERROR: $e");
       setState(() => _isLoading = false);
     }
   }
@@ -53,7 +53,6 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
     }
   }
 
-  // Visual helper to map Database event types to UI
   ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
     switch (eventType.toUpperCase()) {
       case "REJECTED":
@@ -82,7 +81,9 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final log = _auditLogs[index];
-            final v = _getVisualConfig(log['eventType'] ?? 'DRAFTED');
+
+            // 🚨 MATCHING THE EXACT JSON KEYS FROM SPRING BOOT 'AuditLogResponse' DTO
+            final v = _getVisualConfig(log['action'] ?? 'DRAFTED');
 
             return Container(
               padding: const EdgeInsets.all(16),
@@ -109,14 +110,13 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                       children: [
                         Text(v.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                         const SizedBox(height: 4),
-                        // Render the raw JSON details the AI produced
                         Text(
-                          log['detailsJson'] ?? 'No payload data',
+                          log['detail'] ?? 'No payload data', // 🚨 'detail' instead of 'detailsJson'
                           style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _formatTime(log['createdAt'] ?? ''),
+                          _formatTime(log['timestamp'] ?? ''), // 🚨 'timestamp' instead of 'createdAt'
                           style: const TextStyle(color: Colors.grey, fontSize: 12),
                         ),
                       ],

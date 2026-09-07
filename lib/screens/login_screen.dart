@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'signup_screen.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class LoginScreen extends StatefulWidget {
   final void Function(String email) onLoginSuccess;
@@ -35,14 +37,34 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final userId = _userIdCtrl.text.trim();
+      final password = _passwordCtrl.text;
+
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8080/api/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "userId": userId,
+          "password": password
+        }),
+      );
+
       if (!mounted) return;
       setState(() => _loading = false);
-      widget.onLoginSuccess(userId);
+
+      if (response.statusCode == 200) {
+        // Backend confirmed credentials are valid
+        widget.onLoginSuccess(userId);
+      } else {
+        // Display the specific Spring Boot error message (e.g., "Error: Incorrect password.")
+        setState(() {
+          _error = response.body;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Login failed: $e';
+        _error = 'Network Error: Cannot reach the server.';
       });
     }
   }

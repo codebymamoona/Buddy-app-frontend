@@ -547,7 +547,7 @@ class _HomeTabsState extends State<HomeTabs> {
 
   void _openSpendingCapScreen() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => const SpendingCapScreen(),
+      builder: (_) => SpendingCapScreen(userId: widget.userEmail),
     ));
   }
 
@@ -555,10 +555,10 @@ class _HomeTabsState extends State<HomeTabs> {
   Widget build(BuildContext context) {
     final screens = [
       const ChatScreen(),
-      const ApprovalScreen(), // RESTORED
-      const Scaffold(body: Center(child: Text('Friend Profile Offline'))),
-      const AuditTrailScreen(), // RESTORED
-      const Scaffold(body: Center(child: Text('Settings Offline'))),
+      const ApprovalScreen(),
+      const FriendProfileScreen(),
+      AuditTrailScreen(userId: widget.userEmail), // 🚨 INJECTED ID
+      SettingsScreen(userId: widget.userEmail),   // 🚨 INJECTED ID
     ];
 
     // Clear pending quick message after injecting it to prevent repeated calls

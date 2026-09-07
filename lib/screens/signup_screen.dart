@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class SignupScreen extends StatefulWidget {
   final void Function(String userId) onSignupSuccess;
@@ -32,13 +34,41 @@ class _SignupScreenState extends State<SignupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      final userId = _userIdCtrl.text.trim();
+      final name = _nameCtrl.text.trim();
+      final password = _passwordCtrl.text;
 
-    if (!mounted) return;
-    setState(() => _loading = false);
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8080/api/auth/signup'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "userId": userId,
+          "fullName": name,
+          "password": password
+        }),
+      );
 
-    widget.onSignupSuccess(_userIdCtrl.text.trim());
-    Navigator.of(context).pop();
+      if (!mounted) return;
+      setState(() => _loading = false);
+
+      if (response.statusCode == 200) {
+        // Successfully registered in PostgreSQL
+        widget.onSignupSuccess(userId);
+        Navigator.of(context).pop();
+      } else {
+        // Show the conflict error (e.g., "Error: User ID already taken.")
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(response.body), backgroundColor: AppColors.danger),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Network Error: Cannot reach the server.'), backgroundColor: AppColors.danger),
+      );
+    }
   }
 
   @override

@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'spending_cap_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
+  // 🚨 SECURITY FIX: The screen now demands the authenticated user ID
+  final String userId;
+
+  const SettingsScreen({super.key, required this.userId});
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +35,19 @@ class SettingsScreen extends StatelessWidget {
             title: 'Security Controls',
             icon: Icons.security_rounded,
             children: [
-              _buildSettingRow('Approval Threshold', 'PKR 0 (All Orders)'),
+              _buildInteractiveRow(
+                label: 'Spending Controls & Limits',
+                value: 'Configure',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      // 🚨 DYNAMIC INJECTION: Passing the real authenticated user
+                      builder: (context) => SpendingCapScreen(userId: userId),
+                    ),
+                  );
+                },
+              ),
               const Divider(color: AppColors.border),
               _buildSettingRow('Action Expiry', '15 Minutes'),
             ],
@@ -77,12 +93,38 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Widget _buildSettingRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-        Text(value, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+          Text(value, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInteractiveRow({required String label, required String value, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+            Row(
+              children: [
+                Text(value, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.primary, size: 14),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
