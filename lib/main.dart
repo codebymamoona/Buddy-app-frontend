@@ -393,8 +393,7 @@ class _HomeTabsState extends State<HomeTabs> {
     'Approval Needed',
     'Friend Profile',
     'Activity Log',
-    'Gift Ideas',
-    'Settings',
+    'System Settings', // 🚨 Replaced 'Gift Ideas' and 'Settings' with this
   ];
 
   @override
@@ -554,11 +553,11 @@ class _HomeTabsState extends State<HomeTabs> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      const ChatScreen(),
-      const ApprovalScreen(),
-      const FriendProfileScreen(),
-      AuditTrailScreen(userId: widget.userEmail), // 🚨 INJECTED ID
-      SettingsScreen(userId: widget.userEmail),   // 🚨 INJECTED ID
+      ChatScreen(userId: widget.userEmail),          // 🚨 REMOVED CONST, INJECTED ID
+      ApprovalScreen(userId: widget.userEmail),      // 🚨 REMOVED CONST, INJECTED ID
+      FriendProfileScreen(userId: widget.userEmail), // 🚨 REMOVED CONST, INJECTED ID
+      AuditTrailScreen(userId: widget.userEmail),
+      SettingsScreen(userId: widget.userEmail),
     ];
 
     // Clear pending quick message after injecting it to prevent repeated calls

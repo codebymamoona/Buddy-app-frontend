@@ -1,38 +1,47 @@
 import 'package:flutter/material.dart';
 
+/// Buddy design system colors — LIGHT THEME ONLY.
+/// Do not add dark-mode variants here; ThemeMode is locked to light
+/// in main.dart per product decision (Sept 2026).
 class AppColors {
-  // --- MISSING FALLBACKS FOR SECONDARY SCREENS ---
-  static const Color white = Colors.white;
-  static const Color grey = Colors.grey;
-  static const Color primaryRed = Colors.redAccent;
-  static const Color pureBlack = Colors.black;
-  static const Gradient redGradient = LinearGradient(colors: [Colors.redAccent, Colors.red]);
+  // Brand
+  static const primary = Color(0xFF0F6E56);      // deep teal — brand identity
+  static const primaryDark = Color(0xFF085041);   // pressed/hover state
+  static const accent = Color(0xFFD85A30);        // coral — reserved for CTAs (Approve, primary actions)
+  static const accentDark = Color(0xFF993C1D);
 
-  // --- YOUR EXISTING THEME COLORS ---
-  static const primary = Color(0xFFE50914);
-  static const primaryDark = Color(0xFFB81D24);
-  static const success = Color(0xFF1DB876);
-  static const danger = Color(0xFFFF4D4D);
-  static const warning = Color(0xFFF5A623);
-  static const bg = Color(0xFF0F0F12);
-  static const surface = Color(0xFF18181C);
-  static const inputBg = Color(0xFF222228);
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFA0A0AB);
-  static const border = Color(0xFF2C2C35);
-  static Color? get ink => null;
+  // Status
+  static const success = Color(0xFF3B6D11);
+  static const successBg = Color(0xFFEAF3DE);
+  static const danger = Color(0xFFA32D2D);
+  static const dangerBg = Color(0xFFFCEBEB);
+  static const warning = Color(0xFF854F0B);
+  static const warningBg = Color(0xFFFAEEDA);
+  static const info = Color(0xFF185FA5);
+  static const infoBg = Color(0xFFE6F1FB);
+
+  // Neutrals (light surfaces)
+  static const bg = Color(0xFFF1EFE8);            // page background — warm off-white
+  static const surface = Color(0xFFFFFFFF);       // cards, app bar
+  static const inputBg = Color(0xFFF7F6F2);
+  static const textPrimary = Color(0xFF2C2C2A);
+  static const textSecondary = Color(0xFF5F5E5A);
+  static const textMuted = Color(0xFF888780);
+  static const border = Color(0xFFD3D1C7);
 }
 
 class AppTheme {
   static ThemeData get light {
-    final base = ThemeData.dark(useMaterial3: true);
+    final base = ThemeData.light(useMaterial3: true);
 
     return base.copyWith(
       scaffoldBackgroundColor: AppColors.bg,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         primary: AppColors.primary,
+        secondary: AppColors.accent,
         surface: AppColors.surface,
         onSurface: AppColors.textPrimary,
+        error: AppColors.danger,
       ),
       textTheme: base.textTheme.apply(
         fontFamily: 'Roboto',
@@ -61,9 +70,11 @@ class AppTheme {
         ),
         margin: EdgeInsets.zero,
       ),
+      // Primary actions (e.g. "Approve") use accent, not brand teal —
+      // keeps the HITL approval button visually distinct from ambient brand chrome.
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
+          backgroundColor: AppColors.accent,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -107,7 +118,7 @@ class AppTheme {
           borderSide: const BorderSide(color: AppColors.danger),
         ),
         labelStyle: const TextStyle(color: AppColors.textSecondary, fontFamily: 'Roboto'),
-        hintStyle: const TextStyle(color: AppColors.textSecondary, fontFamily: 'Roboto'),
+        hintStyle: const TextStyle(color: AppColors.textMuted, fontFamily: 'Roboto'),
         prefixIconColor: AppColors.textSecondary,
         suffixIconColor: AppColors.textSecondary,
       ),
@@ -115,7 +126,7 @@ class AppTheme {
         backgroundColor: AppColors.surface,
         elevation: 2,
         height: 64,
-        indicatorColor: AppColors.primary.withValues(alpha: 0.2),
+        indicatorColor: AppColors.primary.withValues(alpha: 0.15),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
@@ -131,8 +142,8 @@ class AppTheme {
         }),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-        labelStyle: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w500, fontFamily: 'Roboto'),
+        backgroundColor: AppColors.primary.withValues(alpha: 0.10),
+        labelStyle: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w500, fontFamily: 'Roboto'),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),

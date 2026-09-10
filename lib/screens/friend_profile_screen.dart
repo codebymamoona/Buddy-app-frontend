@@ -1,32 +1,36 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 
 class FriendProfileScreen extends StatefulWidget {
-  const FriendProfileScreen({super.key});
+  // Owner of this friend profile — required, no hardcoded fallback.
+  final String userId;
+
+  const FriendProfileScreen({super.key, required this.userId});
 
   @override
   State<FriendProfileScreen> createState() => _FriendProfileScreenState();
 }
 
 class _FriendProfileScreenState extends State<FriendProfileScreen> {
-  // 🚨 STRIPPED FAKE DATA: Controllers now start empty, ready for real input
   final _nameCtrl = TextEditingController();
   final _birthdayCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
 
   final List<String> _likes = [];
-  String _relationship = "Best Friend";
+  String _relationship = "Best friend";
+  bool _saving = false;
 
   final List<String> _relationshipOptions = [
-    "Best Friend", "Close Friend", "Colleague", "Family", "Acquaintance"
+    "Best friend", "Close friend", "Colleague", "Family", "Acquaintance"
   ];
 
-  // Pre-curated interest options for quick-selection sheet
   final Map<String, List<String>> _suggestedInterests = {
-    "Gaming & Tech": ["Board Games", "PC Gaming", "AI Tech", "Cybersecurity", "VR"],
-    "Fitness & Outdoor": ["Hiking", "Cycling", "Gym & Weightlifting", "Yoga", "Running"],
-    "Entertainment": ["Sci-Fi Movies", "Anime", "Podcasts", "Live Music", "Reading"],
-    "Food & Drink": ["Specialty Coffee", "Cooking", "Craft Beer", "Baking", "Sushi"],
+    "Gaming & tech": ["Board games", "PC gaming", "AI & tech", "Cybersecurity", "VR"],
+    "Fitness & outdoor": ["Hiking", "Cycling", "Gym & weightlifting", "Yoga", "Running"],
+    "Entertainment": ["Sci-fi movies", "Anime", "Podcasts", "Live music", "Reading"],
+    "Food & drink": ["Specialty coffee", "Cooking", "Craft beer", "Baking", "Sushi"],
   };
 
   @override
@@ -37,13 +41,74 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     super.dispose();
   }
 
+  // TODO: this endpoint and payload shape are a guess, matching the pattern
+  // of the other screens' backend calls — confirm the real route and field
+  // names in your Spring Boot controller before relying on this.
+  Future<void> _saveProfile() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a name before saving.'), backgroundColor: AppColors.danger),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8080/api/friends'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "ownerId": widget.userId,
+          "name": name,
+          "birthday": _birthdayCtrl.text.trim(),
+          "relationship": _relationship,
+          "interests": _likes,
+          "notes": _notesCtrl.text.trim(),
+        }),
+      );
+
+      if (!mounted) return;
+      setState(() => _saving = false);
+      FocusScope.of(context).unfocus();
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile saved.'),
+            backgroundColor: AppColors.success,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save. Try again."),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Network error: cannot reach the server.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   void _openAddInterestSheet() {
     final customInputCtrl = TextEditingController();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.bg,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -74,8 +139,8 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Add Context & Preferences',
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      'Add an interest',
+                      style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -83,11 +148,11 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                         Expanded(
                           child: TextField(
                             controller: customInputCtrl,
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
                             decoration: InputDecoration(
-                              hintText: 'Type custom preference...',
-                              hintStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                              fillColor: AppColors.surface,
+                              hintText: 'Type something they like...',
+                              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                              fillColor: AppColors.inputBg,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               border: OutlineInputBorder(
@@ -111,7 +176,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           ),
-                          child: const Text('Add', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          child: const Text('Add', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                         ),
                       ],
                     ),
@@ -122,7 +187,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                         children: [
                           Text(
                             entry.key,
-                            style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 8),
                           Wrap(
@@ -136,10 +201,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                                 labelStyle: TextStyle(
                                   color: isSelected ? Colors.white : AppColors.textSecondary,
                                   fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                                 ),
                                 selectedColor: AppColors.primary,
-                                backgroundColor: AppColors.surface,
+                                backgroundColor: AppColors.inputBg,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                   side: BorderSide(
@@ -183,8 +248,8 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         elevation: 0,
         centerTitle: true,
         title: const Text(
-          'Target Profile',
-          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+          'Friend profile',
+          style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600),
         ),
       ),
       body: SingleChildScrollView(
@@ -223,25 +288,25 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             const SizedBox(height: 32),
 
             _buildSectionCard(
-              title: 'Identity Data',
+              title: 'About them',
               icon: Icons.badge_outlined,
               children: [
-                _buildInputField(controller: _nameCtrl, label: 'Full Name', icon: Icons.person_outline),
+                _buildInputField(controller: _nameCtrl, label: 'Full name', icon: Icons.person_outline),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: Divider(color: AppColors.border, thickness: 1),
                 ),
-                _buildInputField(controller: _birthdayCtrl, label: 'Date of Birth (Optional)', icon: Icons.cake_outlined),
+                _buildInputField(controller: _birthdayCtrl, label: 'Birthday (optional)', icon: Icons.cake_outlined),
               ],
             ),
             const SizedBox(height: 16),
 
             _buildSectionCard(
-              title: 'Network Link',
-              icon: Icons.hub_outlined,
+              title: 'Relationship',
+              icon: Icons.people_outline,
               children: [
                 _buildDropdownRow(
-                  label: 'Relationship Classification',
+                  label: 'How do you know them?',
                   icon: Icons.people_outline,
                   value: _relationship,
                   options: _relationshipOptions,
@@ -252,8 +317,8 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             const SizedBox(height: 16),
 
             _buildSectionCard(
-              title: 'Behavioral Metrics',
-              icon: Icons.psychology_outlined,
+              title: 'Interests',
+              icon: Icons.favorite_border_rounded,
               actionWidget: GestureDetector(
                 onTap: _openAddInterestSheet,
                 child: Container(
@@ -265,7 +330,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
               children: [
                 if (_likes.isEmpty)
                   const Text(
-                    'No preferences logged. Tap + to add.',
+                    'Nothing added yet. Tap + to add an interest.',
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                   )
                 else
@@ -273,10 +338,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: _likes.map((item) => Chip(
-                      backgroundColor: AppColors.bg,
+                      backgroundColor: AppColors.inputBg,
                       side: const BorderSide(color: AppColors.primary, width: 1),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      label: Text(item, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                      label: Text(item, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
                       deleteIcon: const Icon(Icons.close, size: 14, color: AppColors.textSecondary),
                       onDeleted: () => setState(() => _likes.remove(item)),
                     )).toList(),
@@ -286,16 +351,16 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             const SizedBox(height: 16),
 
             _buildSectionCard(
-              title: 'Secure Notes',
-              icon: Icons.lock_outline,
+              title: 'Notes for Buddy',
+              icon: Icons.sticky_note_2_outlined,
               children: [
                 TextField(
                   controller: _notesCtrl,
                   maxLines: 3,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
                   decoration: const InputDecoration(
-                    hintText: 'Enter specific dietary restrictions, gift ideas, or context for the AI...',
-                    hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                    hintText: 'Dietary restrictions, gift ideas, anything else worth remembering...',
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
                     border: InputBorder.none,
                     isDense: true,
                   ),
@@ -307,24 +372,20 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             SizedBox(
               height: 52,
               child: ElevatedButton(
-                onPressed: () {
-                  // 🚨 TACTILE FEEDBACK FOR THE DEMO 🚨
-                  FocusScope.of(context).unfocus(); // Dismiss keyboard
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Profile securely encrypted and stored in Postgres.'),
-                      backgroundColor: Colors.green,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
+                onPressed: _saving ? null : _saveProfile,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: const Text(
-                  'SYNC TO VAULT',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                child: _saving
+                    ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+                    : const Text(
+                  'Save profile',
+                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -353,7 +414,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                 children: [
                   Icon(icon, color: AppColors.primary, size: 20),
                   const SizedBox(width: 8),
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                  Text(title, style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
                 ],
               ),
               if (actionWidget != null) actionWidget,
@@ -374,7 +435,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         Expanded(
           child: TextField(
             controller: controller,
-            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               labelText: label,
               labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
@@ -403,7 +464,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                 dropdownColor: AppColors.surface,
                 underline: const SizedBox(),
                 icon: const Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w500),
                 items: options.map((String opt) => DropdownMenuItem<String>(value: opt, child: Text(opt))).toList(),
                 onChanged: onChanged,
               ),

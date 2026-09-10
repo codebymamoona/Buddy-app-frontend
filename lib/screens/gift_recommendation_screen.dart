@@ -15,21 +15,21 @@ class GiftRecommendationScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: 0.1),
+                color: AppColors.warningBg,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.engineering_rounded, color: AppColors.warning, size: 48),
+              child: const Icon(Icons.card_giftcard_rounded, color: AppColors.warning, size: 48),
             ),
             const SizedBox(height: 16),
             const Text(
-              'AI Gift Engine Offline',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+              "Gift suggestions aren't ready yet",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 8),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 32.0),
               child: Text(
-                'GiftDelegatorTool is not yet implemented in the Spring Boot backend. Hardcoded mocks have been disabled for security testing.',
+                "We're still building this. Check back soon.",
                 style: TextStyle(color: AppColors.textSecondary, height: 1.4),
                 textAlign: TextAlign.center,
               ),

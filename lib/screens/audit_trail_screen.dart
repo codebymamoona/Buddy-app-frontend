@@ -4,7 +4,9 @@ import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 
 class AuditTrailScreen extends StatefulWidget {
-  final String userId; // 🚨 ZERO-TRUST INJECTION
+  // Required real user ID — no hardcoded fallback. Caller must pass the
+  // actual logged-in user's identity.
+  final String userId;
 
   const AuditTrailScreen({super.key, required this.userId});
 
@@ -15,6 +17,7 @@ class AuditTrailScreen extends StatefulWidget {
 class _AuditTrailScreenState extends State<AuditTrailScreen> {
   List<dynamic> _auditLogs = [];
   bool _isLoading = true;
+  String? _loadError;
 
   @override
   void initState() {
@@ -23,21 +26,35 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
   }
 
   Future<void> _fetchAuditLogs() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
     try {
-      // 🚨 SECURE TUNNEL + DYNAMIC ID
-      final response = await http.get(Uri.parse('http://127.0.0.1:8080/api/audit-log?userId=${widget.userId}'));
+      // Plain HTTP to localhost — fine for local dev, NOT a secure channel.
+      // Move to HTTPS + auth header before this talks to anything but
+      // 127.0.0.1.
+      final response =
+      await http.get(Uri.parse('http://127.0.0.1:8080/api/audit-log?userId=${widget.userId}'));
 
+      if (!mounted) return;
       if (response.statusCode == 200) {
         setState(() {
           _auditLogs = jsonDecode(response.body);
           _isLoading = false;
         });
       } else {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _loadError = 'Could not load your activity.';
+        });
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Network error: cannot reach the server.';
+      });
     }
   }
 
@@ -49,19 +66,19 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       final ampm = t.hour >= 12 ? 'PM' : 'AM';
       return '${t.month}/${t.day} · $h:$m $ampm';
     } catch (e) {
-      return "Unknown Time";
+      return "Unknown time";
     }
   }
 
   ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
     switch (eventType.toUpperCase()) {
       case "REJECTED":
-        return (icon: Icons.block_rounded, color: AppColors.danger, label: 'Blocked by User');
+        return (icon: Icons.block_rounded, color: AppColors.danger, label: 'Denied');
       case "APPROVED":
-        return (icon: Icons.verified_rounded, color: AppColors.success, label: 'Authorized');
+        return (icon: Icons.verified_rounded, color: AppColors.success, label: 'Approved');
       case "DRAFTED":
       default:
-        return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'AI Drafted Order');
+        return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'Drafted, waiting on you');
     }
   }
 
@@ -71,8 +88,11 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       backgroundColor: AppColors.bg,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? _buildErrorState()
           : _auditLogs.isEmpty
-          ? const Center(child: Text('No audit records found.', style: TextStyle(color: AppColors.textSecondary)))
+          ? const Center(
+          child: Text('No activity yet.', style: TextStyle(color: AppColors.textSecondary)))
           : RefreshIndicator(
         onRefresh: _fetchAuditLogs,
         child: ListView.separated(
@@ -82,7 +102,10 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           itemBuilder: (context, index) {
             final log = _auditLogs[index];
 
-            // 🚨 MATCHING THE EXACT JSON KEYS FROM SPRING BOOT 'AuditLogResponse' DTO
+            // Verify these keys against the real AuditLogResponse
+            // DTO — if the backend actually sends detailsJson /
+            // createdAt, these fallbacks will render silently
+            // wrong instead of erroring.
             final v = _getVisualConfig(log['action'] ?? 'DRAFTED');
 
             return Container(
@@ -98,7 +121,7 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: v.color.withValues(alpha: 0.15),
+                      color: v.color.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(v.icon, color: v.color, size: 22),
@@ -108,16 +131,21 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(v.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                        Text(v.label,
+                            style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15)),
                         const SizedBox(height: 4),
                         Text(
-                          log['detail'] ?? 'No payload data', // 🚨 'detail' instead of 'detailsJson'
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
+                          log['detail'] ?? 'No details available',
+                          style: const TextStyle(
+                              color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _formatTime(log['timestamp'] ?? ''), // 🚨 'timestamp' instead of 'createdAt'
-                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          _formatTime(log['timestamp'] ?? ''),
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                         ),
                       ],
                     ),
@@ -127,6 +155,22 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 40),
+          const SizedBox(height: 12),
+          Text(_loadError ?? 'Something went wrong.',
+              style: const TextStyle(color: AppColors.textSecondary)),
+          const SizedBox(height: 16),
+          OutlinedButton(onPressed: _fetchAuditLogs, child: const Text('Retry')),
+        ],
       ),
     );
   }
