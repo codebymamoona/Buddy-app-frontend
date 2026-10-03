@@ -1,12 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class AuditTrailScreen extends StatefulWidget {
-  // Required real user ID — no hardcoded fallback. Caller must pass the
-  // actual logged-in user's identity.
-  final String userId;
+  final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
 
   const AuditTrailScreen({super.key, required this.userId});
 
@@ -15,6 +12,7 @@ class AuditTrailScreen extends StatefulWidget {
 }
 
 class _AuditTrailScreenState extends State<AuditTrailScreen> {
+  final ApiService _api = ApiService();
   List<dynamic> _auditLogs = [];
   bool _isLoading = true;
   String? _loadError;
@@ -31,29 +29,20 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       _loadError = null;
     });
     try {
-      // Plain HTTP to localhost — fine for local dev, NOT a secure channel.
-      // Move to HTTPS + auth header before this talks to anything but
-      // 127.0.0.1.
-      final response =
-      await http.get(Uri.parse('http://127.0.0.1:8080/api/audit-log?userId=${widget.userId}'));
-
+      // NOTE: assumes AuditLogController is updated to read identity from
+      // the verified token, same as ActionController — not yet confirmed.
+      // If this fails, that backend fix hasn't landed yet.
+      final logs = await _api.getAuditLog();
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        setState(() {
-          _auditLogs = jsonDecode(response.body);
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-          _loadError = 'Could not load your activity.';
-        });
-      }
+      setState(() {
+        _auditLogs = logs;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _loadError = 'Network error: cannot reach the server.';
+        _loadError = 'Could not load your activity.';
       });
     }
   }
@@ -64,19 +53,24 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
       final m = t.minute.toString().padLeft(2, '0');
       final ampm = t.hour >= 12 ? 'PM' : 'AM';
-      return '${t.month}/${t.day} · $h:$m $ampm';
+      return '${t.month}/${t.day} \u00b7 $h:$m $ampm';
     } catch (e) {
       return "Unknown time";
     }
   }
 
   ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
+    // 🚨 FIXED: Catches all possible backend states
     switch (eventType.toUpperCase()) {
       case "REJECTED":
+      case "DENIED":
         return (icon: Icons.block_rounded, color: AppColors.danger, label: 'Denied');
       case "APPROVED":
+      case "EXECUTED":
+      case "COMPLETED":
         return (icon: Icons.verified_rounded, color: AppColors.success, label: 'Approved');
       case "DRAFTED":
+      case "PENDING":
       default:
         return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'Drafted, waiting on you');
     }
@@ -91,6 +85,7 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           : _loadError != null
           ? _buildErrorState()
           : _auditLogs.isEmpty
+      // 🚨 FIXED: Reverted the empty state back to a simple string
           ? const Center(
           child: Text('No activity yet.', style: TextStyle(color: AppColors.textSecondary)))
           : RefreshIndicator(
@@ -102,11 +97,8 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           itemBuilder: (context, index) {
             final log = _auditLogs[index];
 
-            // Verify these keys against the real AuditLogResponse
-            // DTO — if the backend actually sends detailsJson /
-            // createdAt, these fallbacks will render silently
-            // wrong instead of erroring.
-            final v = _getVisualConfig(log['action'] ?? 'DRAFTED');
+            // 🚨 FIXED: The status check is here inside the builder
+            final v = _getVisualConfig(log['eventType'] ?? log['action'] ?? 'DRAFTED');
 
             return Container(
               padding: const EdgeInsets.all(16),
@@ -138,7 +130,8 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                                 fontSize: 15)),
                         const SizedBox(height: 4),
                         Text(
-                          log['detail'] ?? 'No details available',
+                          // 🚨 FIXED: The detail check belongs down here where 'log' actually exists
+                          log['detailsJson'] ?? log['payload'] ?? log['detail'] ?? 'No details available',
                           style: const TextStyle(
                               color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                         ),

@@ -1,14 +1,11 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class ChatScreen extends StatefulWidget {
-  // Required real user ID — was hardcoded 'aqil_01' in two places in this
-  // file. Same fix as approval_screen.dart and audit_trail_screen.dart:
-  // caller must supply the actual logged-in user.
-  final String userId;
+  final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
 
   const ChatScreen({super.key, required this.userId});
 
@@ -19,6 +16,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  final ApiService _api = ApiService();
   bool _buddyTyping = false;
 
   late final PendingActionService _actionService;
@@ -36,7 +34,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     _actionService = PendingActionService(
-      userId: widget.userId,
       onNewActionDetected: _showReceiptBottomSheet,
     );
     _actionService.startPolling();
@@ -60,11 +57,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Extracts the assistant's reply text from the backend response.
   // TODO: confirm the real /api/chat response shape with the backend — this
   // guesses common key names (reply/message/response) and falls back to the
-  // raw body only if the response isn't JSON at all. Verify against the
-  // actual Spring Boot ChatController DTO rather than trusting this guess.
+  // raw body only if the response isn't JSON at all.
   String _extractReplyText(String rawBody) {
     try {
       final decoded = jsonDecode(rawBody);
@@ -73,7 +68,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return decoded.toString();
     } catch (_) {
-      // Not JSON — assume it's already plain text.
       return rawBody;
     }
   }
@@ -90,29 +84,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollToBottom();
 
     try {
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/chat'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "userId": widget.userId,
-          "message": text,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _messages.add(ChatMessage(text: _extractReplyText(response.body), fromBuddy: true));
-        });
-      } else {
-        setState(() {
-          _messages.add(ChatMessage(
-              text: "Something went wrong on my end. Try that again in a moment.", fromBuddy: true));
-        });
-      }
+      final replyBody = await _api.sendChatMessage(message: text);
+      setState(() {
+        _messages.add(ChatMessage(text: _extractReplyText(replyBody), fromBuddy: true));
+      });
     } catch (e) {
+      final isNetworkError = e.toString().contains('Network connection failed');
       setState(() {
         _messages.add(ChatMessage(
-            text: "I couldn't reach the server. Check your connection and try again.", fromBuddy: true));
+          text: isNetworkError
+              ? "I couldn't reach the server. Check your connection and try again."
+              : "Something went wrong on my end. Try that again in a moment.",
+          fromBuddy: true,
+        ));
       });
     } finally {
       setState(() {
@@ -147,16 +131,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               const SizedBox(height: 16),
               Text("Type: ${action['toolName']}", style: const TextStyle(color: AppColors.textSecondary)),
               const SizedBox(height: 8),
-
               ...payloadDetails.entries.map((e) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: Text("${e.key.toUpperCase()}: ${e.value}",
                     style: const TextStyle(fontSize: 15, color: AppColors.textPrimary)),
               )),
-
               const Divider(height: 32, color: AppColors.border),
-              // Not danger-red: this is a normal order total, not an error.
-              // Red is reserved for denied/failed states elsewhere in the app.
               Text(
                 "Total: PKR ${action['cost']}",
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.primary),
@@ -231,7 +211,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               itemCount: _messages.length + (_buddyTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _messages.length) {
-                  // 🚨 REPLACED STATIC TEXT WITH ANIMATION WIDGET
                   return const _TypingIndicator();
                 }
                 final m = _messages[index];
@@ -328,29 +307,24 @@ class _Composer extends StatelessWidget {
 }
 
 class PendingActionService {
-  final String baseUrl = "http://127.0.0.1:8080/api/actions";
-  final String userId;
+  final ApiService _api;
   Timer? _pollingTimer;
   Function(Map<String, dynamic>)? onNewActionDetected;
 
-  PendingActionService({required this.userId, this.onNewActionDetected});
+  PendingActionService({ApiService? api, this.onNewActionDetected}) : _api = api ?? ApiService();
 
   void startPolling() {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       try {
-        final response = await http.get(Uri.parse('$baseUrl/pending/$userId'));
-        if (response.statusCode == 200) {
-          List<dynamic> actions = jsonDecode(response.body);
-          if (actions.isNotEmpty && onNewActionDetected != null) {
-            stopPolling();
-            onNewActionDetected!(actions.first);
-          }
+        final actions = await _api.getPendingActions();
+        if (actions.isNotEmpty && onNewActionDetected != null) {
+          stopPolling();
+          onNewActionDetected!(actions.first);
         }
       } catch (e) {
         // Intentionally silent: a 3-second poll failing once shouldn't spam
-        // the user with errors. If this needs a retry ceiling / backoff for
-        // repeated failures, that's worth adding before defense.
+        // the user with errors.
       }
     });
   }
@@ -361,13 +335,9 @@ class PendingActionService {
 
   Future<bool> submitDecision(int actionId, String decision) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/$actionId/decision'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"userId": userId, "decision": decision}),
-      );
+      final success = await _api.submitActionDecision(actionId, decision);
       startPolling();
-      return response.statusCode == 200;
+      return success;
     } catch (e) {
       return false;
     }

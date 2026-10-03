@@ -1,16 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class ApprovalScreen extends StatefulWidget {
-  // Was hardcoded 'aqil_01' inside the API calls below — that meant every
-  // user on the app saw and could act on ONE test account's pending queue,
-  // bypassing ownership verification entirely. Now required: the caller
-  // (wherever this screen is pushed) must pass the real logged-in user's ID
-  // (Firebase UID / AppState.instance.currentUserId — whatever your actual
-  // session source is). This is a required param specifically so the app
-  // won't compile until every call site supplies a real value.
   final String userId;
 
   const ApprovalScreen({super.key, required this.userId});
@@ -20,6 +13,7 @@ class ApprovalScreen extends StatefulWidget {
 }
 
 class _ApprovalScreenState extends State<ApprovalScreen> {
+  final ApiService _api = ApiService();
   List<dynamic> _pendingActions = [];
   bool _isLoading = true;
   String? _loadError;
@@ -37,44 +31,27 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
       _loadError = null;
     });
     try {
-      final response = await http.get(
-        Uri.parse('http://127.0.0.1:8080/api/actions/pending/${widget.userId}'),
-      );
+      final actions = await _api.getPendingActions();
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        setState(() {
-          _pendingActions = jsonDecode(response.body);
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-          _loadError = 'Could not load pending actions.';
-        });
-      }
+      setState(() {
+        _pendingActions = actions;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _loadError = 'Network error: cannot reach the server.';
+        _loadError = 'Could not load pending actions.';
       });
     }
   }
 
-  // Was: fire-and-forget with print() on failure. A user tapping Approve/Deny
-  // needs to know if that decision actually reached the backend — silent
-  // failure here means the user believes an action was authorized or
-  // blocked when the server never received it.
   Future<void> _submitDecision(int actionId, String decision) async {
     setState(() => _submittingIds.add(actionId));
     try {
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/actions/$actionId/decision'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"userId": widget.userId, "decision": decision}),
-      );
+      final success = await _api.submitActionDecision(actionId, decision);
       if (!mounted) return;
-      if (response.statusCode != 200) {
+      if (!success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Couldn't send your decision. Try again."),
@@ -143,7 +120,7 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: AppColors.successBg, shape: BoxShape.circle),
+            decoration: const BoxDecoration(color: AppColors.successBg, shape: BoxShape.circle),
             child: const Icon(Icons.task_alt_rounded, color: AppColors.success, size: 48),
           ),
           const SizedBox(height: 16),
@@ -158,7 +135,16 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
   }
 
   Widget _buildApprovalCard(Map<String, dynamic> action) {
-    Map<String, dynamic> payload = jsonDecode(action['payload']);
+    // 🚨 FIXED: The try-catch block that stops the screen from crashing on bad AI drafts
+    Map<String, dynamic> payload = {};
+    String rawPayload = action['payload']?.toString() ?? '{}';
+
+    try {
+      payload = jsonDecode(rawPayload);
+    } catch (e) {
+      payload = {"Details": rawPayload};
+    }
+
     final isSubmitting = _submittingIds.contains(action['id']);
 
     return Card(
@@ -179,7 +165,7 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    "Source: ${action['toolName']}",
+                    "Source: ${action['toolName'] ?? 'Buddy AI'}",
                     style: const TextStyle(
                         color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
                   ),
@@ -187,20 +173,17 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
               ],
             ),
             const Divider(height: 30, color: AppColors.border),
-
             ...payload.entries.map((e) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Text("${e.key.toUpperCase()}: ${e.value}",
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
             )),
-
             const SizedBox(height: 16),
             Text(
-              "Deduction: PKR ${action['cost']}",
+              "Deduction: PKR ${action['cost'] ?? '0.00'}",
               style: const TextStyle(color: AppColors.primary, fontSize: 20, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 20),
-
             Row(
               children: [
                 Expanded(

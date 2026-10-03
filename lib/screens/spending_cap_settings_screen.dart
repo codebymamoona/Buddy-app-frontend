@@ -1,53 +1,68 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class SpendingCapScreen extends StatefulWidget {
-  final String userId; // Pass this from your auth state
-
-  const SpendingCapScreen({super.key, required this.userId});
+  const SpendingCapScreen({super.key});
 
   @override
   State<SpendingCapScreen> createState() => _SpendingCapScreenState();
 }
 
 class _SpendingCapScreenState extends State<SpendingCapScreen> {
-  // 🚨 Default UI values. In a full implementation, you fetch these via GET request in initState
-  double _monthlyCap = 5000;
-  double _threshold = 200;
-  bool _autoApprove = false;
+  final ApiService _api = ApiService();
+  double _dailyCap = 5000;
+  bool _isSaving = false;
+  bool _isLoading = true;
 
+  final bool _autoApproveLocked = true;
+  final bool _categoryFirewallsLocked = true;
+
+  double _threshold = 200;
+  bool _autoApproveDraft = false;
   final Map<String, double> _categoryDraft = {
     'Food': 2000,
     'Clothing': 2000,
     'Travel': 1000,
   };
 
-  bool _isSaving = false;
+  @override
+  void initState() {
+    super.initState();
+    _fetchCurrentCap();
+  }
 
-  Future<void> _saveToVault() async {
-    setState(() => _isSaving = true);
-
+  Future<void> _fetchCurrentCap() async {
     try {
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/settings/spending-cap'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "userId": widget.userId,
-          "monthlyCap": _monthlyCap,
-          "autoApproveThreshold": _autoApprove ? _threshold : 0.0,
-          "categoryCaps": _categoryDraft,
-        }),
+      final cap = await _api.getSpendingCap();
+      if (!mounted) return;
+      setState(() {
+        if (cap != null) _dailyCap = cap;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load your current cap. Showing default.'),
+          backgroundColor: AppColors.danger,
+        ),
       );
+    }
+  }
 
+  Future<void> _saveCap() async {
+    setState(() => _isSaving = true);
+    try {
+      final success = await _api.updateSpendingCap(_dailyCap);
       if (!mounted) return;
       setState(() => _isSaving = false);
 
-      if (response.statusCode == 200) {
+      if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('SECURITY PROTOCOL: Caps locked in PostgreSQL vault.'),
+            content: Text('Daily spending cap updated.'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -55,7 +70,7 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
         Navigator.of(context).maybePop();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${response.body}'), backgroundColor: AppColors.danger),
+          const SnackBar(content: Text('Could not update your cap.'), backgroundColor: AppColors.danger),
         );
       }
     } catch (e) {
@@ -63,8 +78,8 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
       setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Network Error: Cannot reach Zero-Trust backend.'),
-            backgroundColor: AppColors.danger
+          content: Text('Network error: cannot reach the server.'),
+          backgroundColor: AppColors.danger,
         ),
       );
     }
@@ -72,9 +87,12 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Mock spent value for UI preview - backend should calculate real spend
-    const double totalSpent = 1200.0;
-    final ratio = _monthlyCap <= 0 ? 0.0 : (totalSpent / _monthlyCap).clamp(0.0, 1.0).toDouble();
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -82,7 +100,8 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
         backgroundColor: AppColors.surface,
         elevation: 0,
         centerTitle: true,
-        title: const Text('Spending Controls', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text('Spending Controls',
+            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
           onPressed: () => Navigator.of(context).maybePop(),
@@ -91,77 +110,63 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
-          // ---- Overall monthly cap ----
           _buildConfigCard(
-            title: 'Global Monthly Cap',
+            title: 'Daily Spending Cap',
             icon: Icons.account_balance_wallet_outlined,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('PKR 1200 spent', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                  Text('PKR ${_monthlyCap.toStringAsFixed(0)} cap',
-                      style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13)),
-                ],
+              Text(
+                'PKR ${_dailyCap.toStringAsFixed(0)} cap per day',
+                style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13),
               ),
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: LinearProgressIndicator(
-                  value: ratio,
-                  minHeight: 8,
-                  backgroundColor: AppColors.border,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-                ),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               Slider(
-                value: _monthlyCap,
+                value: _dailyCap,
                 min: 500,
                 max: 20000,
                 divisions: 39,
                 activeColor: AppColors.primary,
                 inactiveColor: AppColors.border,
-                label: 'PKR ${_monthlyCap.toStringAsFixed(0)}',
-                onChanged: (v) => setState(() => _monthlyCap = v),
+                label: 'PKR ${_dailyCap.toStringAsFixed(0)}',
+                onChanged: (v) => setState(() => _dailyCap = v),
               ),
               const Align(
                 alignment: Alignment.center,
-                child: Text('Drag to set AI total monthly budget', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                child: Text('Drag to set your daily approval limit',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
               ),
             ],
           ),
           const SizedBox(height: 18),
-
-          // ---- Approval rules ----
           _buildConfigCard(
             title: 'Zero-Trust Rules',
             icon: Icons.rule_rounded,
+            locked: _autoApproveLocked,
+            lockedLabel: 'Pending supervisor sign-off \u2014 every order requires approval for now',
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Auto-approve micro-orders', style: TextStyle(color: Colors.white, fontSize: 14)),
                   Switch(
-                    value: _autoApprove,
+                    value: _autoApproveDraft,
                     activeColor: AppColors.primary,
                     inactiveTrackColor: AppColors.border,
-                    onChanged: (v) => setState(() => _autoApprove = v),
+                    onChanged: _autoApproveLocked ? null : (v) => setState(() => _autoApproveDraft = v),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               Text(
-                _autoApprove
+                _autoApproveDraft
                     ? 'Orders up to PKR ${_threshold.toStringAsFixed(0)} bypass manual approval.'
                     : 'Every single AI transaction requires your explicit authorization.',
                 style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
               ),
               const SizedBox(height: 16),
               Opacity(
-                opacity: _autoApprove ? 1 : 0.3,
+                opacity: _autoApproveDraft ? 1 : 0.3,
                 child: IgnorePointer(
-                  ignoring: !_autoApprove,
+                  ignoring: true,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -181,7 +186,7 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
                         activeColor: AppColors.primary,
                         inactiveColor: AppColors.border,
                         label: 'PKR ${_threshold.toStringAsFixed(0)}',
-                        onChanged: (v) => setState(() => _threshold = v),
+                        onChanged: (v) {},
                       ),
                     ],
                   ),
@@ -190,33 +195,34 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
             ],
           ),
           const SizedBox(height: 18),
-
-          // ---- Per-category caps ----
           _buildConfigCard(
             title: 'Category Firewalls',
             icon: Icons.pie_chart_outline_rounded,
-            children: _categoryDraft.keys.map((category) => _CategoryCapRow(
+            locked: _categoryFirewallsLocked,
+            lockedLabel: 'Coming in a future phase \u2014 not enforced yet',
+            children: _categoryDraft.keys
+                .map((category) => _CategoryCapRow(
               category: category,
-              spent: category == 'Food' ? 700 : 0, // Mock spend for demo
+              spent: 0,
               cap: _categoryDraft[category]!,
-              onChanged: (v) => setState(() => _categoryDraft[category] = v),
-            )).toList(),
+              onChanged: (v) {},
+            ))
+                .toList(),
           ),
           const SizedBox(height: 28),
-
-          // ---- Save Button ----
           SizedBox(
             height: 52,
             child: ElevatedButton(
-              onPressed: _isSaving ? null : _saveToVault,
+              onPressed: _isSaving ? null : _saveCap,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               child: _isSaving
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                  height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text(
-                'ENFORCE LIMITS',
+                'SAVE DAILY CAP',
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
               ),
             ),
@@ -226,7 +232,13 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
     );
   }
 
-  Widget _buildConfigCard({required String title, required IconData icon, required List<Widget> children}) {
+  Widget _buildConfigCard({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+    bool locked = false,
+    String? lockedLabel,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -242,10 +254,21 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
               Icon(icon, color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
               Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+              if (locked) ...[
+                const Spacer(),
+                const Icon(Icons.lock_outline, color: AppColors.textSecondary, size: 16),
+              ],
             ],
           ),
+          if (locked && lockedLabel != null) ...[
+            const SizedBox(height: 6),
+            Text(lockedLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5, fontStyle: FontStyle.italic)),
+          ],
           const SizedBox(height: 16),
-          ...children,
+          Opacity(
+            opacity: locked ? 0.5 : 1.0,
+            child: IgnorePointer(ignoring: locked, child: Column(children: children)),
+          ),
         ],
       ),
     );
@@ -262,17 +285,20 @@ class _CategoryCapRow extends StatelessWidget {
 
   IconData get _icon {
     switch (category) {
-      case 'Food': return Icons.restaurant_rounded;
-      case 'Clothing': return Icons.shopping_bag_rounded;
-      case 'Travel': return Icons.flight_takeoff_rounded;
-      default: return Icons.category_rounded;
+      case 'Food':
+        return Icons.restaurant_rounded;
+      case 'Clothing':
+        return Icons.shopping_bag_rounded;
+      case 'Travel':
+        return Icons.flight_takeoff_rounded;
+      default:
+        return Icons.category_rounded;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final ratio = cap <= 0 ? 0.0 : (spent / cap).clamp(0.0, 1.0).toDouble();
-    final over = spent > cap;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -285,8 +311,8 @@ class _CategoryCapRow extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(child: Text(category, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14))),
               Text(
-                'PKR ${spent.toStringAsFixed(0)} / PKR ${cap.toStringAsFixed(0)}',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: over ? AppColors.danger : AppColors.textSecondary),
+                'PKR ${cap.toStringAsFixed(0)} cap',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
               ),
             ],
           ),
@@ -297,20 +323,7 @@ class _CategoryCapRow extends StatelessWidget {
               value: ratio,
               minHeight: 6,
               backgroundColor: AppColors.border,
-              valueColor: AlwaysStoppedAnimation(over ? AppColors.danger : AppColors.primary),
-            ),
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 2, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6)),
-            child: Slider(
-              value: cap.clamp(500, 10000).toDouble(),
-              min: 500,
-              max: 10000,
-              divisions: 19,
-              activeColor: AppColors.primary,
-              inactiveColor: AppColors.border,
-              label: 'PKR ${cap.toStringAsFixed(0)}',
-              onChanged: onChanged,
+              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
             ),
           ),
         ],

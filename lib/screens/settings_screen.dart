@@ -1,14 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import 'spending_cap_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
-  final String userId;
+  final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
 
   const SettingsScreen({super.key, required this.userId});
 
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('You will need to sign in again to use Buddy.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Log out', style: TextStyle(color: AppColors.danger)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      // AuthGate listens to authStateChanges() and swaps to the login screen
+      // on its own — no navigation needed here.
+      await FirebaseAuth.instance.signOut();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final email = FirebaseAuth.instance.currentUser?.email ?? 'Unknown';
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: ListView(
@@ -36,7 +65,7 @@ class SettingsScreen extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => SpendingCapScreen(userId: userId),
+                      builder: (context) => const SpendingCapScreen(),
                     ),
                   );
                 },
@@ -45,13 +74,38 @@ class SettingsScreen extends StatelessWidget {
               _buildSettingRow('Approval expiry', '15 minutes'),
             ],
           ),
+          const SizedBox(height: 16),
+          _buildConfigCard(
+            title: 'Account',
+            icon: Icons.person_outline_rounded,
+            children: [
+              _buildSettingRow('Signed in as', email),
+              const Divider(color: AppColors.border),
+              InkWell(
+                onTap: () => _confirmLogout(context),
+                borderRadius: BorderRadius.circular(8),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout_rounded, color: AppColors.danger, size: 18),
+                      SizedBox(width: 10),
+                      Text(
+                        'Log out',
+                        style: TextStyle(color: AppColors.danger, fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
           // Removed: a "Backend Connection" card previously showed the raw
-          // host, port, and database engine (127.0.0.1:8080, PostgreSQL)
-          // directly in user-facing Settings. That's infrastructure detail
-          // with no value to a real user and a real disclosure risk once
-          // this points at anything other than localhost. If you need this
-          // for testing, put it behind a developer-only debug screen, not
-          // here.
+          // host, port, and database engine directly in user-facing Settings.
+          // That's infrastructure detail with no value to a real user and a
+          // real disclosure risk once this points at anything other than
+          // localhost. If you need this for testing, put it behind a
+          // developer-only debug screen, not here.
         ],
       ),
     );
@@ -89,7 +143,15 @@ class SettingsScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
-          Text(value, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14)),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+          ),
         ],
       ),
     );

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../util/firebase_errors.dart';
 import 'signup_screen.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 
 class LoginScreen extends StatefulWidget {
   final void Function(String email) onLoginSuccess;
@@ -14,7 +14,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _userIdCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscure = true;
   bool _loading = false;
@@ -23,15 +23,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _userIdCtrl.dispose();
+    _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
   }
 
-  // NOTE: backend call logic left untouched per instruction.
-  // Flagged separately: this posts credentials directly to the Spring Boot
-  // backend rather than going through Firebase Auth — reconcile with the
-  // documented auth architecture before defense.
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
@@ -40,30 +36,25 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final userId = _userIdCtrl.text.trim();
+      final email = _emailCtrl.text.trim();
       final password = _passwordCtrl.text;
 
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "userId": userId,
-          "password": password
-        }),
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
 
       if (!mounted) return;
       setState(() => _loading = false);
-
-      if (response.statusCode == 200) {
-        widget.onLoginSuccess(userId);
-      } else {
-        // TODO: don't surface raw response.body in production — parse a
-        // clean message from the backend's error payload instead.
-        setState(() {
-          _error = response.body;
-        });
-      }
+      // AuthGate's authStateChanges() stream reacts to this automatically —
+      // this callback is now mostly a formality for the constructor shape.
+      widget.onLoginSuccess(credential.user?.email ?? email);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = mapFirebaseAuthError(e.code);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -81,9 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           children: [
             const _CurvedHeader(),
-
             const SizedBox(height: 28),
-
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28),
               child: ConstrainedBox(
@@ -121,10 +110,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
 
                       TextFormField(
-                        controller: _userIdCtrl,
+                        controller: _emailCtrl,
                         style: const TextStyle(color: AppColors.textPrimary),
                         decoration: InputDecoration(
-                          hintText: 'Username',
+                          hintText: 'Email',
                           hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
                           fillColor: AppColors.inputBg,
                           filled: true,
@@ -142,7 +131,11 @@ class _LoginScreenState extends State<LoginScreen> {
                             borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
                           ),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Username required' : null,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Email is required';
+                          if (!v.contains('@')) return 'Enter a valid email';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 16),
 
@@ -222,7 +215,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 28),
 
-                      // Flat CTA — accent (coral), no gradient, no shadow.
                       SizedBox(
                         height: 52,
                         child: ElevatedButton(

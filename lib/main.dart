@@ -17,6 +17,8 @@ import 'screens/audit_trail_screen.dart';
 import 'screens/spending_cap_settings_screen.dart';
 import 'screens/settings_screen.dart';
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 StreamSubscription? _overlaySubscription;
 
@@ -32,6 +34,12 @@ void overlayMain() {
       ),
     ),
   );
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  runApp(const BuddyApp());
 }
 
 /// Floating Robot Bubble Widget with Mini Inline Quick Reply & Keyboard Support
@@ -309,7 +317,6 @@ class _ChatBubbleOverlayState extends State<ChatBubbleOverlay> {
   }
 }
 
-void main() => runApp(const BuddyApp());
 
 class BuddyApp extends StatelessWidget {
   const BuddyApp({super.key});
@@ -334,23 +341,33 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  String? _loggedInEmail;
+  // 🚨 Converts the single-use Firebase stream into a multi-use broadcast stream
+  late final Stream<User?> _authStream;
 
-  void _handleLoginSuccess(String email) => setState(() => _loggedInEmail = email);
-
-  void _handleLogout() => setState(() {
-    _loggedInEmail = null;
-  });
+  @override
+  void initState() {
+    super.initState();
+    _authStream = FirebaseAuth.instance.authStateChanges().asBroadcastStream();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (_loggedInEmail == null) {
-      return LoginScreen(onLoginSuccess: _handleLoginSuccess);
-    }
-    // Bypassed PreferencesScreen entirely to keep backend logic clean and stable
-    return HomeTabs(userEmail: _loggedInEmail!, onLogout: _handleLogout);
+    return StreamBuilder<User?>(
+      stream: _authStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        final user = snapshot.data;
+        if (user == null) {
+          return LoginScreen(onLoginSuccess: (_) {});
+        }
+        return HomeTabs(userEmail: user.email!, onLogout: () => FirebaseAuth.instance.signOut());
+      },
+    );
   }
 }
+
 
 class HomeTabs extends StatefulWidget {
   final String userEmail;
@@ -546,16 +563,16 @@ class _HomeTabsState extends State<HomeTabs> {
 
   void _openSpendingCapScreen() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SpendingCapScreen(userId: widget.userEmail),
+      builder: (_) => const SpendingCapScreen(),
     ));
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-      ChatScreen(userId: widget.userEmail),          // 🚨 REMOVED CONST, INJECTED ID
-      ApprovalScreen(userId: widget.userEmail),      // 🚨 REMOVED CONST, INJECTED ID
-      FriendProfileScreen(userId: widget.userEmail), // 🚨 REMOVED CONST, INJECTED ID
+      ChatScreen(userId: widget.userEmail),
+      ApprovalScreen(userId: widget.userEmail),
+      FriendProfileScreen(userId: widget.userEmail),
       AuditTrailScreen(userId: widget.userEmail),
       SettingsScreen(userId: widget.userEmail),
     ];

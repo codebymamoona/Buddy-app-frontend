@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../util/firebase_errors.dart';
 
 class SignupScreen extends StatefulWidget {
   final void Function(String userId) onSignupSuccess;
@@ -14,7 +14,7 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
-  final _userIdCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _obscurePassword = true;
@@ -24,46 +24,44 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _userIdCtrl.dispose();
+    _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
   }
 
-  // NOTE: backend call logic left untouched per instruction.
-  // Same auth-architecture flag as login_screen.dart applies here.
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
     try {
-      final userId = _userIdCtrl.text.trim();
+      final email = _emailCtrl.text.trim();
       final name = _nameCtrl.text.trim();
       final password = _passwordCtrl.text;
 
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/auth/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "userId": userId,
-          "fullName": name,
-          "password": password
-        }),
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
       );
+      // Display name is stored on the Firebase account. Note: the backend's
+      // /api/users/me auto-provisioning currently defaults fullName to
+      // "Buddy User" regardless of this — it doesn't yet read the name from
+      // here. Flagging rather than silently leaving a mismatch: if you want
+      // the typed name to actually reach the User row in Postgres, that's a
+      // small backend change (accept a name on first provisioning call),
+      // not something this screen can do alone.
+      await credential.user?.updateDisplayName(name);
 
       if (!mounted) return;
       setState(() => _loading = false);
-
-      if (response.statusCode == 200) {
-        widget.onSignupSuccess(userId);
-        Navigator.of(context).pop();
-      } else {
-        // TODO: same raw-body leak as login_screen.dart — parse a clean
-        // message instead of showing the backend's response verbatim.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(response.body), backgroundColor: AppColors.danger),
-        );
-      }
+      widget.onSignupSuccess(credential.user?.email ?? email);
+      Navigator.of(context).pop();
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mapFirebaseAuthError(e.code)), backgroundColor: AppColors.danger),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -88,8 +86,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Fixed: was hardcoded Colors.white, invisible on the
-                    // light scaffold background. Uses textPrimary now.
                     Row(
                       children: [
                         IconButton(
@@ -124,13 +120,13 @@ class _SignupScreenState extends State<SignupScreen> {
                     const SizedBox(height: 18),
 
                     _buildInputField(
-                      controller: _userIdCtrl,
-                      label: 'User ID',
-                      hint: '@',
+                      controller: _emailCtrl,
+                      label: 'Email',
+                      hint: 'you@example.com',
                       icon: Icons.alternate_email,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'User ID is required';
-                        if (v.contains(' ')) return 'User ID cannot contain spaces';
+                        if (v == null || v.trim().isEmpty) return 'Email is required';
+                        if (!v.contains('@')) return 'Enter a valid email';
                         return null;
                       },
                     ),
@@ -176,7 +172,6 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 32),
 
-                    // Flat CTA — accent (coral), no gradient, no shadow.
                     SizedBox(
                       height: 52,
                       child: ElevatedButton(
