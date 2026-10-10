@@ -2,10 +2,36 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 
+class DecisionResult {
+  final bool ok;
+  final int statusCode;
+  final String message;
+  const DecisionResult(this.ok, this.statusCode, this.message);
+}
+
 class ApiService {
   final http.Client _client;
 
   ApiService({http.Client? client}) : _client = client ?? http.Client();
+
+  Future<DecisionResult> submitActionDecisionDetailed(int actionId, String decision) async {
+    final url = Uri.parse('${ApiConfig.baseUrl}/actions/$actionId/decision');
+    try {
+      final response = await _client.post(
+        url,
+        headers: await ApiConfig.authHeaders(),
+        body: jsonEncode({'decision': decision}),
+      );
+      final code = response.statusCode;
+      if (code == 200) return DecisionResult(true, code, '');
+      if (code == 401) return DecisionResult(false, code, 'Your session expired. Please sign in again.');
+      if (code >= 500) return DecisionResult(false, code, 'The server hit an error. Please try again.');
+      final text = response.body.replaceFirst(RegExp(r'^(ERROR|SUCCESS):\s*'), '').trim();
+      return DecisionResult(false, code, text.isNotEmpty ? text : 'The request could not be completed.');
+    } catch (_) {
+      return const DecisionResult(false, 0, "Couldn't reach the server. Your decision was not sent.");
+    }
+  }
 
   Future<String> sendChatMessage({required String message}) async {
     final url = Uri.parse('${ApiConfig.baseUrl}/chat');

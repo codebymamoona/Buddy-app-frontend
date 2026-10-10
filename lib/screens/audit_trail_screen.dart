@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../services/app_signals.dart';
 
 class AuditTrailScreen extends StatefulWidget {
   final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
@@ -18,34 +19,43 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
   String? _loadError;
 
   @override
-  void initState() {
-    super.initState();
-    _fetchAuditLogs();
-  }
-
-  Future<void> _fetchAuditLogs() async {
-    setState(() {
-      _isLoading = true;
-      _loadError = null;
-    });
-    try {
-      // NOTE: assumes AuditLogController is updated to read identity from
-      // the verified token, same as ActionController — not yet confirmed.
-      // If this fails, that backend fix hasn't landed yet.
-      final logs = await _api.getAuditLog();
-      if (!mounted) return;
-      setState(() {
-        _auditLogs = logs;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _loadError = 'Could not load your activity.';
-      });
+    void initState() {
+      super.initState();
+      AppSignals.auditChanged.addListener(_onSignal);
+      _fetchAuditLogs();
     }
-  }
+
+    @override
+      void dispose() {
+        AppSignals.auditChanged.removeListener(_onSignal);
+        super.dispose();
+      }
+
+      void _onSignal() => _fetchAuditLogs(silent: true);
+
+    Future<void> _fetchAuditLogs({bool silent = false}) async {
+      if (!silent) {
+        setState(() {
+          _isLoading = true;
+          _loadError = null;
+        });
+      }
+      try {
+        final logs = await _api.getAuditLog();
+        if (!mounted) return;
+        setState(() {
+          _auditLogs = logs;
+          _isLoading = false;
+          _loadError = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          if (!silent) _loadError = 'Could not load your activity.';
+        });
+      }
+    }
 
   String _formatTime(String rawIsoDate) {
     try {
@@ -60,7 +70,6 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
   }
 
   ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
-    // 🚨 FIXED: Catches all possible backend states
     switch (eventType.toUpperCase()) {
       case "REJECTED":
       case "DENIED":
@@ -69,10 +78,14 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       case "EXECUTED":
       case "COMPLETED":
         return (icon: Icons.verified_rounded, color: AppColors.success, label: 'Approved');
+      case "FAILED":
+        return (icon: Icons.error_outline_rounded, color: AppColors.danger, label: 'Could not complete');
+      case "EXPIRED":
+        return (icon: Icons.timer_off_rounded, color: AppColors.textMuted, label: 'Expired');
       case "DRAFTED":
       case "PENDING":
       default:
-        return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'Drafted, waiting on you');
+        return (icon: Icons.pending_actions_rounded, color: AppColors.warning, label: 'Drafted');
     }
   }
 

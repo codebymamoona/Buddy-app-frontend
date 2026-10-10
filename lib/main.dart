@@ -19,6 +19,7 @@ import 'screens/settings_screen.dart';
 import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'services/app_signals.dart';
 
 StreamSubscription? _overlaySubscription;
 
@@ -341,29 +342,44 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  // 🚨 Converts the single-use Firebase stream into a multi-use broadcast stream
-  late final Stream<User?> _authStream;
+  StreamSubscription<User?>? _authSub;
+  User? _user;
+  bool _authReady = false;
 
   @override
   void initState() {
     super.initState();
-    _authStream = FirebaseAuth.instance.authStateChanges().asBroadcastStream();
+    // One subscription for this gate's whole life: no cached stream, no asBroadcastStream.
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (!mounted) return;
+      setState(() {
+        _user = user;
+        _authReady = true;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: _authStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
-        final user = snapshot.data;
-        if (user == null) {
-          return LoginScreen(onLoginSuccess: (_) {});
-        }
-        return HomeTabs(userEmail: user.email!, onLogout: () => FirebaseAuth.instance.signOut());
-      },
+    if (!_authReady) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final user = _user;
+    if (user == null) {
+      return LoginScreen(onLoginSuccess: (_) {});
+    }
+    // email can be null for phone or anonymous accounts; the old code crashed on user.email!
+    final label = user.email ?? user.displayName ?? user.uid;
+    return HomeTabs(
+      key: ValueKey(user.uid),   // a different user never inherits the previous user's screens or chat
+      userEmail: label,
+      onLogout: () => FirebaseAuth.instance.signOut(),
     );
   }
 }
@@ -428,7 +444,7 @@ class _HomeTabsState extends State<HomeTabs> {
         if (!mounted) return;
 
         if (event == "OPEN_APPROVAL") {
-          setState(() => _index = 1);
+          _goToTab(1);
         } else if (event == "OPEN_CHAT") {
           setState(() => _index = 0);
         } else if (event is String && event.startsWith("QUICK_REPLY:")) {
@@ -561,6 +577,18 @@ class _HomeTabsState extends State<HomeTabs> {
     );
   }
 
+    void _goToTab(int i) {
+      setState(() => _index = i);
+      if (i == 1) AppSignals.refreshApprovals();
+      if (i == 3) AppSignals.refreshAudit();
+    }
+
+    Widget _approveIcon(IconData icon) => ValueListenableBuilder<int>(
+          valueListenable: AppSignals.pendingCount,
+          builder: (_, n, __) =>
+              Badge(isLabelVisible: n > 0, label: Text('$n'), child: Icon(icon)),
+        );
+
   void _openSpendingCapScreen() {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => const SpendingCapScreen(),
@@ -570,7 +598,13 @@ class _HomeTabsState extends State<HomeTabs> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      ChatScreen(userId: widget.userEmail),
+            ChatScreen(
+              userId: widget.userEmail,
+              onOpenApproval: (id) {
+                AppSignals.focusActionId.value = id;
+                _goToTab(1);
+              },
+            ),
       ApprovalScreen(userId: widget.userEmail),
       FriendProfileScreen(userId: widget.userEmail),
       AuditTrailScreen(userId: widget.userEmail),
@@ -618,16 +652,16 @@ class _HomeTabsState extends State<HomeTabs> {
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() => _index = i),
-          destinations: const [
+          onDestinationSelected: _goToTab,
+          destinations: [
             NavigationDestination(
                 icon: Icon(Icons.chat_bubble_outline),
                 selectedIcon: Icon(Icons.chat_bubble),
                 label: 'Chat'),
-            NavigationDestination(
-                icon: Icon(Icons.check_circle_outline),
-                selectedIcon: Icon(Icons.check_circle),
-                label: 'Approve'),
+                        NavigationDestination(
+                            icon: _approveIcon(Icons.check_circle_outline),
+                            selectedIcon: _approveIcon(Icons.check_circle),
+                            label: 'Approve'),
             NavigationDestination(
                 icon: Icon(Icons.person_outline),
                 selectedIcon: Icon(Icons.person),
