@@ -1,6 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
 class FriendProfileScreen extends StatefulWidget {
@@ -17,6 +16,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _birthdayCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final ApiService _api = ApiService();
 
   final List<String> _likes = [];
   String _relationship = "Best friend";
@@ -41,9 +41,6 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     super.dispose();
   }
 
-  // TODO: this endpoint and payload shape are a guess, matching the pattern
-  // of the other screens' backend calls — confirm the real route and field
-  // names in your Spring Boot controller before relying on this.
   Future<void> _saveProfile() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
@@ -54,52 +51,26 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     }
 
     setState(() => _saving = true);
-    try {
-      final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/friends'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "ownerId": widget.userId,
-          "name": name,
-          "birthday": _birthdayCtrl.text.trim(),
-          "relationship": _relationship,
-          "interests": _likes,
-          "notes": _notesCtrl.text.trim(),
-        }),
-      );
+    // No ownerId in the body: the server must take the owner from the verified token.
+    final result = await _api.saveFriendProfile({
+      "name": name,
+      "birthday": _birthdayCtrl.text.trim(),
+      "relationship": _relationship,
+      "interests": _likes,
+      "notes": _notesCtrl.text.trim(),
+    });
 
-      if (!mounted) return;
-      setState(() => _saving = false);
-      FocusScope.of(context).unfocus();
+    if (!mounted) return;
+    setState(() => _saving = false);
+    FocusScope.of(context).unfocus();
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile saved.'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Couldn't save. Try again."),
-            backgroundColor: AppColors.danger,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Network error: cannot reach the server.'),
-          backgroundColor: AppColors.danger,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.ok ? 'Profile saved.' : result.message),
+        backgroundColor: result.ok ? AppColors.success : AppColors.danger,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _openAddInterestSheet() {

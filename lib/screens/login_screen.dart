@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../config/app_mode.dart';
 import '../util/firebase_errors.dart';
 import 'signup_screen.dart';
 
@@ -38,6 +39,21 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final email = _emailCtrl.text.trim();
       final password = _passwordCtrl.text;
+
+      if (AppMode.useMock) {
+        await Future<void>.delayed(Duration(milliseconds: AppMode.mockDelayMs));
+        if (!mounted) return;
+        if (email.toLowerCase().contains('fail')) {
+          setState(() {
+            _loading = false;
+            _error = 'Wrong email or password.';
+          });
+        } else {
+          setState(() => _loading = false);
+          widget.onLoginSuccess(email);
+        }
+        return;
+      }
 
       final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,

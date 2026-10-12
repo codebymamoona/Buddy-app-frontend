@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:flutter/foundation.dart';
 
 import 'theme/app_theme.dart';
+import 'config/app_mode.dart';
 import 'models/spending_cap.dart';
 import 'models/audit_entry.dart';
 import 'models/gift_idea.dart';
@@ -22,6 +24,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'services/app_signals.dart';
 
 StreamSubscription? _overlaySubscription;
+// The plugin's stream may only be listened to once per process; wrap it once so HomeTabs can re-listen after logout/login.
+final Stream<dynamic> _overlayEvents = FlutterOverlayWindow.overlayListener.asBroadcastStream();
 
 /// Top-level entry point for the floating Chat Head overlay
 @pragma("vm:entry-point")
@@ -39,7 +43,12 @@ void overlayMain() {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  if (AppMode.useMock && kReleaseMode) {
+    throw StateError('USE_MOCK must never be enabled in a release build.');
+  }
+  if (!AppMode.useMock) {
+    await Firebase.initializeApp();
+  }
   runApp(const BuddyApp());
 }
 
@@ -326,9 +335,16 @@ class BuddyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Buddy',
+      builder: (context, child) => AppMode.useMock
+          ? Banner(message: 'MOCK', location: BannerLocation.topEnd, child: child)
+          : child!,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const AuthGate(),
+      home: AppMode.useMock
+          ? (AppMode.start == 'login'
+          ? LoginScreen(onLoginSuccess: (_) {})
+          : HomeTabs(userEmail: 'demo@buddy.app', onLogout: () {}))
+          : const AuthGate(),
     );
   }
 }
@@ -439,7 +455,7 @@ class _HomeTabsState extends State<HomeTabs> {
     // Cancel previous subscription if it exists
     _overlaySubscription?.cancel();
 
-    _overlaySubscription = FlutterOverlayWindow.overlayListener.listen(
+    _overlaySubscription = _overlayEvents.listen(
           (event) async {
         if (!mounted) return;
 

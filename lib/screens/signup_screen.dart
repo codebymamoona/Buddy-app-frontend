@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../config/app_mode.dart';
 import '../util/firebase_errors.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -38,6 +39,21 @@ class _SignupScreenState extends State<SignupScreen> {
       final email = _emailCtrl.text.trim();
       final name = _nameCtrl.text.trim();
       final password = _passwordCtrl.text;
+
+      if (AppMode.useMock) {
+        await Future<void>.delayed(Duration(milliseconds: AppMode.mockDelayMs));
+        if (!mounted) return;
+        setState(() => _loading = false);
+        if (email.toLowerCase().contains('fail')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('That email is already registered.'), backgroundColor: AppColors.danger),
+          );
+          return;
+        }
+        widget.onSignupSuccess(email);
+        Navigator.of(context).pop();
+        return;
+      }
 
       final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
