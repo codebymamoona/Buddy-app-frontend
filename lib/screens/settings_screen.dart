@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import 'spending_cap_settings_screen.dart';
+import '../config/app_mode.dart';
 
 class SettingsScreen extends StatelessWidget {
   final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
@@ -30,13 +31,23 @@ class SettingsScreen extends StatelessWidget {
     if (confirmed == true) {
       // AuthGate listens to authStateChanges() and swaps to the login screen
       // on its own — no navigation needed here.
+      if (AppMode.useMock) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Log out is disabled in mock mode.')),
+          );
+        }
+        return;
+      }
       await FirebaseAuth.instance.signOut();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final email = FirebaseAuth.instance.currentUser?.email ?? 'Unknown';
+    final email = AppMode.useMock
+        ? 'demo@buddy.app'
+        : (FirebaseAuth.instance.currentUser?.email ?? 'Unknown');
 
     return Scaffold(
       backgroundColor: AppColors.bg,
