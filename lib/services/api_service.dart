@@ -137,4 +137,25 @@ class ApiService {
     );
     return response.statusCode == 200;
   }
+
+  Future<bool> updateFcmToken(String token) async {
+    if (AppMode.useMock) return true;
+    final url = Uri.parse('${ApiConfig.baseUrl}/users/me/fcm-token');
+    try {
+      final response = await _client.put(
+        url,
+        headers: await ApiConfig.authHeaders(),
+        body: jsonEncode({'token': token}),
+      );
+      if (response.statusCode == 200) {
+        print('Successfully registered FCM token with backend.');
+        return true;
+      }
+      print('Backend rejected FCM token (${response.statusCode}): ${response.body}');
+      return false;
+    } catch (e) {
+      print('Network error updating FCM token: $e');
+      return false;
+    }
+  }
 }

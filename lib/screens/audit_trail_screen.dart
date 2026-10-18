@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; // REQUIRED: For strict, accurate date formatting
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../services/app_signals.dart';
+import '../models/audit_entry.dart'; // REQUIRED: Import the strong model
 
 class AuditTrailScreen extends StatefulWidget {
-  final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
+  final String userId;
 
   const AuditTrailScreen({super.key, required this.userId});
 
@@ -14,58 +16,52 @@ class AuditTrailScreen extends StatefulWidget {
 
 class _AuditTrailScreenState extends State<AuditTrailScreen> {
   final ApiService _api = ApiService();
-  List<dynamic> _auditLogs = [];
+
+  // STRICT TYPING: No more 'dynamic'. We only accept validated models.
+  List<AuditEntry> _auditLogs = [];
   bool _isLoading = true;
   String? _loadError;
 
   @override
-    void initState() {
-      super.initState();
-      AppSignals.auditChanged.addListener(_onSignal);
-      _fetchAuditLogs();
+  void initState() {
+    super.initState();
+    AppSignals.auditChanged.addListener(_onSignal);
+    _fetchAuditLogs();
+  }
+
+  @override
+  void dispose() {
+    AppSignals.auditChanged.removeListener(_onSignal);
+    super.dispose();
+  }
+
+  void _onSignal() => _fetchAuditLogs(silent: true);
+
+  Future<void> _fetchAuditLogs({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
     }
-
-    @override
-      void dispose() {
-        AppSignals.auditChanged.removeListener(_onSignal);
-        super.dispose();
-      }
-
-      void _onSignal() => _fetchAuditLogs(silent: true);
-
-    Future<void> _fetchAuditLogs({bool silent = false}) async {
-      if (!silent) {
-        setState(() {
-          _isLoading = true;
-          _loadError = null;
-        });
-      }
-      try {
-        final logs = await _api.getAuditLog();
-        if (!mounted) return;
-        setState(() {
-          _auditLogs = logs;
-          _isLoading = false;
-          _loadError = null;
-        });
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          _isLoading = false;
-          if (!silent) _loadError = 'Could not load your activity.';
-        });
-      }
-    }
-
-  String _formatTime(String rawIsoDate) {
     try {
-      final t = DateTime.parse(rawIsoDate).toLocal();
-      final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
-      final m = t.minute.toString().padLeft(2, '0');
-      final ampm = t.hour >= 12 ? 'PM' : 'AM';
-      return '${t.month}/${t.day} \u00b7 $h:$m $ampm';
-    } catch (e) {
-      return "Unknown time";
+      final rawLogs = await _api.getAuditLog();
+      if (!mounted) return;
+      setState(() {
+        // MAP THE DATA: Convert the raw JSON list into strictly typed AuditEntry objects
+        _auditLogs = (rawLogs as List)
+            .map((json) => AuditEntry.fromJson(json))
+            .toList();
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (e, st) {
+      debugPrint('AUDIT LOAD FAILED: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (!silent) _loadError = 'Could not load your activity.';
+      });
     }
   }
 
@@ -98,7 +94,6 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           : _loadError != null
           ? _buildErrorState()
           : _auditLogs.isEmpty
-      // 🚨 FIXED: Reverted the empty state back to a simple string
           ? const Center(
           child: Text('No activity yet.', style: TextStyle(color: AppColors.textSecondary)))
           : RefreshIndicator(
@@ -108,10 +103,9 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
           itemCount: _auditLogs.length,
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
-            final log = _auditLogs[index];
-
-            // 🚨 FIXED: The status check is here inside the builder
-            final v = _getVisualConfig(log['eventType'] ?? log['action'] ?? 'DRAFTED');
+            // entry is now a guaranteed AuditEntry object, not a random map
+            final entry = _auditLogs[index];
+            final v = _getVisualConfig(entry.status);
 
             return Container(
               padding: const EdgeInsets.all(16),
@@ -142,15 +136,16 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                                 fontWeight: FontWeight.w600,
                                 fontSize: 15)),
                         const SizedBox(height: 4),
+                        // INJECT REAL DATA: Stop guessing keys. Map directly to the model.
                         Text(
-                          // 🚨 FIXED: The detail check belongs down here where 'log' actually exists
-                          log['detailsJson'] ?? log['payload'] ?? log['detail'] ?? 'No details available',
+                          '${entry.item} · ${entry.brand} · PKR ${entry.cost} · Ref #${entry.id}',
                           style: const TextStyle(
                               color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                         ),
                         const SizedBox(height: 8),
+                        // FIX THE TIME TRAVEL BUG: Use intl to format the strictly parsed DateTime
                         Text(
-                          _formatTime(log['timestamp'] ?? ''),
+                          DateFormat('MM/dd - h:mm a').format(entry.timestamp),
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                         ),
                       ],

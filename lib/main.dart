@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:flutter/foundation.dart';
-
+import 'services/push_service.dart';
 import 'theme/app_theme.dart';
 import 'config/app_mode.dart';
 import 'models/spending_cap.dart';
@@ -365,13 +365,17 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    // One subscription for this gate's whole life: no cached stream, no asBroadcastStream.
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (!mounted) return;
       setState(() {
         _user = user;
         _authReady = true;
       });
+      if (user != null) {
+        PushService.init();    // fires for fresh login AND restored sessions
+      } else {
+        PushService.reset();
+      }
     });
   }
 
@@ -423,7 +427,7 @@ class _HomeTabsState extends State<HomeTabs> {
 
   final List<AuditEntry> _auditEntries = [
     AuditEntry(
-        timestamp: DateTime.now(), action: 'Order placed', detail: 'Cake, Rs 450'),
+        id: 999, brand: 'System', item: 'Cake', cost: 450.0, timestamp: DateTime.now(), status: 'DRAFTED'),
   ];
 
   final List<GiftIdea> _giftIdeas = [
@@ -541,7 +545,7 @@ class _HomeTabsState extends State<HomeTabs> {
       _auditEntries.insert(
         0,
         AuditEntry(
-            timestamp: DateTime.now(), action: 'Approved', detail: _pendingItem),
+            id: 999, brand: 'System', item: _pendingItem, cost: _pendingAmount, timestamp: DateTime.now(), status: 'APPROVED'),
       );
     });
 
@@ -555,7 +559,7 @@ class _HomeTabsState extends State<HomeTabs> {
       _auditEntries.insert(
         0,
         AuditEntry(
-            timestamp: DateTime.now(), action: 'Denied', detail: _pendingItem),
+            id: 999, brand: 'System', item: _pendingItem, cost: _pendingAmount, timestamp: DateTime.now(), status: 'DENIED'),
       );
     });
 

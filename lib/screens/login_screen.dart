@@ -4,6 +4,8 @@ import '../theme/app_theme.dart';
 import '../config/app_mode.dart';
 import '../util/firebase_errors.dart';
 import 'signup_screen.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import '../services/api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final void Function(String email) onLoginSuccess;
@@ -60,11 +62,21 @@ class _LoginScreenState extends State<LoginScreen> {
         password: password,
       );
 
+      // --- HITL NOTIFICATION GATE: REGISTER DEVICE ---
+      // try {
+      //   final fcmToken = await FirebaseMessaging.instance.getToken();
+      //   if (fcmToken != null) {
+      //     await ApiService().updateFcmToken(fcmToken);
+      //   }
+      // } catch (e) {
+      //   print('Failed to generate or send FCM token: $e');
+      // }
+      // -----------------------------------------------
+
       if (!mounted) return;
       setState(() => _loading = false);
-      // AuthGate's authStateChanges() stream reacts to this automatically —
-      // this callback is now mostly a formality for the constructor shape.
       widget.onLoginSuccess(credential.user?.email ?? email);
+
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {

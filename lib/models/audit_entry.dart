@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class AuditEntry {
   final int id;
   final String brand;
@@ -16,17 +18,37 @@ class AuditEntry {
   });
 
   factory AuditEntry.fromJson(Map<String, dynamic> json) {
-    // Dig into the nested payload if your backend wraps it, otherwise use the root
-    final payload = json['payload'] ?? json;
+    // detailsJson is JSON for drafted/executed rows but a plain sentence for
+    // rejected/expired/failed rows. Never assume it parses.
+    Map<String, dynamic> details = {};
+    String note = '';
+    final raw = json['detailsJson'] ?? json['details_json'];
+    if (raw is Map) {
+      details = Map<String, dynamic>.from(raw);
+    } else if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          details = Map<String, dynamic>.from(decoded);
+        } else {
+          note = raw.trim();
+        }
+      } catch (_) {
+        note = raw.trim();
+      }
+    }
+
+    final idValue = json['actionId'] ?? json['id'];
+    final createdRaw = json['createdAt'] ?? json['created_at'];
 
     return AuditEntry(
-      id: json['id'] as int, // The real database primary key
-      brand: payload['brand'] as String,
-      item: payload['item'] as String,
-      cost: (payload['cost'] as num).toDouble(),
-      // Strict parsing of the ISO 8601 string from Spring Boot
-      timestamp: DateTime.parse(json['created_at'] as String),
-      status: json['status'] as String,
+      id: idValue is num ? idValue.toInt() : 0,
+      brand: details['brand']?.toString() ?? 'System',
+      item: details['item']?.toString() ?? (note.isNotEmpty ? note : 'Unknown Item'),
+      cost: double.tryParse('${details['cost'] ?? 0}') ?? 0.0,
+      // A missing timestamp shows as 1970 on purpose: obviously wrong beats plausibly wrong.
+      timestamp: DateTime.tryParse('${createdRaw ?? ''}') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      status: (json['eventType'] ?? json['status'] ?? 'UNKNOWN').toString(),
     );
   }
 }

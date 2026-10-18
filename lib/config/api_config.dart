@@ -10,10 +10,10 @@ class ApiConfig {
   static String get baseUrl {
     if (_override.isNotEmpty) return _override;
 
-    // 10.0.2.2 routes to the host machine from the Android Emulator.
+    // 127.0.0.1 routes to the host machine from the Android Emulator.
     // localhost routes to the host machine from iOS Simulator or Web.
     if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8080/api';
+      return 'http://127.0.0.1:8080/api';
     }
     return 'http://localhost:8080/api';
   }
