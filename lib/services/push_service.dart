@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
-package:flutter_local_notifications/flutter_local_notifications.dart
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class PushService {
   static bool _started = false;
@@ -18,12 +18,18 @@ class PushService {
   );
 
   static Future<void> _setupChannel() async {
-    await _local.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ));
-    await _local
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_hitlChannel);
+    try {
+      await _local.initialize(
+        settings: const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        ),
+      );
+      await _local
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(_hitlChannel);
+    } catch (e) {
+      debugPrint('channel setup failed: $e');
+    }
   }
 
   static Future<void> init() async {
