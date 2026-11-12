@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/friend_profile.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
@@ -18,9 +19,18 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   final _notesCtrl = TextEditingController();
   final ApiService _api = ApiService();
 
+  static const int _maxLikes = 3;
+  static const int _maxLikeLen = 40;
+
   final List<String> _likes = [];
   String _relationship = "Best friend";
+  String _birthdayIso = ''; // yyyy-MM-dd, '' when not set
   bool _saving = false;
+
+  List<FriendProfile> _saved = [];
+  bool _loadingSaved = true;
+  String? _loadError;
+  String? _editingName; // non-null while editing an existing contact
 
   final List<String> _relationshipOptions = [
     "Best friend", "Close friend", "Colleague", "Family", "Acquaintance"
@@ -34,6 +44,124 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _loadSaved();
+  }
+
+  Future<void> _loadSaved() async {
+    setState(() {
+      _loadingSaved = true;
+      _loadError = null;
+    });
+    try {
+      final raw = await _api.getFriends();
+      final list = raw
+          .map((e) => FriendProfile.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _saved = list;
+        _loadingSaved = false;
+      });
+    } catch (e) {
+      debugPrint('LOAD FRIENDS FAILED: $e');
+      if (!mounted) return;
+      setState(() {
+        _loadingSaved = false;
+        _loadError = 'Could not load your saved people. Check your connection and retry.';
+      });
+    }
+  }
+
+  void _toast(String msg, {bool ok = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: ok ? AppColors.success : AppColors.danger,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _resetForm() {
+    _nameCtrl.clear();
+    _notesCtrl.clear();
+    _birthdayCtrl.clear();
+    _birthdayIso = '';
+    _likes.clear();
+    _relationship = _relationshipOptions.first;
+    _editingName = null;
+  }
+
+  void _startEdit(FriendProfile f) {
+    setState(() {
+      _editingName = f.name;
+      _nameCtrl.text = f.name;
+      _notesCtrl.text = f.notes;
+      _birthdayIso = f.birthday;
+      _birthdayCtrl.text = f.birthday;
+      _likes
+        ..clear()
+        ..addAll(f.likes.take(_maxLikes));
+      _relationship = _relationshipOptions.contains(f.relationship)
+          ? f.relationship
+          : _relationshipOptions.first;
+    });
+  }
+
+  Future<void> _confirmDelete(FriendProfile f) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Delete ${f.name}?', style: const TextStyle(color: AppColors.textPrimary)),
+        content: const Text('This removes their profile and likes. It cannot be undone.',
+            style: TextStyle(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    try {
+      final result = await _api.deleteFriend(f.name);
+      if (!mounted) return;
+      if (result.ok) {
+        if (_editingName == f.name) setState(_resetForm);
+        _toast('${f.name} deleted.', ok: true);
+        _loadSaved();
+      } else {
+        _toast(result.message);
+      }
+    } catch (e) {
+      if (mounted) _toast('Could not delete. Try again.');
+    }
+  }
+
+  Future<void> _pickBirthday() async {
+    final now = DateTime.now();
+    DateTime initial = DateTime(now.year - 20, now.month, now.day);
+    if (_birthdayIso.isNotEmpty) {
+      initial = DateTime.tryParse(_birthdayIso) ?? initial;
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1920),
+      lastDate: now,
+    );
+    if (picked == null) return;
+    final iso =
+        '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+    setState(() {
+      _birthdayIso = iso;
+      _birthdayCtrl.text = iso;
+    });
+  }
+
+  @override
   void dispose() {
     _nameCtrl.dispose();
     _birthdayCtrl.dispose();
@@ -44,37 +172,58 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   Future<void> _saveProfile() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add a name before saving.'), backgroundColor: AppColors.danger),
-      );
+      _toast('Add a name before saving.');
+      return;
+    }
+    if (name.length > 60) {
+      _toast('Name must be at most 60 characters.');
+      return;
+    }
+    if (_likes.length > _maxLikes) {
+      _toast('At most $_maxLikes interests.');
       return;
     }
 
     setState(() => _saving = true);
-    // No ownerId in the body: the server must take the owner from the verified token.
-    final result = await _api.saveFriendProfile({
-      "name": name,
-      "birthday": _birthdayCtrl.text.trim(),
-      "relationship": _relationship,
-      "interests": _likes,
-      "notes": _notesCtrl.text.trim(),
-    });
+    try {
+      // No ownerId in the body: the server takes the owner from the verified token.
+      final result = await _api.saveFriendProfile({
+        "name": name,
+        "birthday": _birthdayIso,
+        "relationship": _relationship,
+        "interests": _likes,
+        "notes": _notesCtrl.text.trim(),
+      });
 
-    if (!mounted) return;
-    setState(() => _saving = false);
-    FocusScope.of(context).unfocus();
+      if (!mounted) return;
+      setState(() => _saving = false);
+      FocusScope.of(context).unfocus();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.ok ? 'Profile saved.' : result.message),
-        backgroundColor: result.ok ? AppColors.success : AppColors.danger,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      if (result.ok) {
+        // Renaming = new contact on the server (name is the key): remove the old one.
+        final old = _editingName;
+        if (old != null && old.toLowerCase() != name.toLowerCase()) {
+          try {
+            await _api.deleteFriend(old);
+          } catch (_) {}
+        }
+        if (!mounted) return;
+        setState(_resetForm);
+        _toast('Profile saved.', ok: true);
+        _loadSaved();
+      } else {
+        _toast(result.message.replaceFirst('ERROR: ', ''));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('Could not save. Check your connection and try again.');
+    }
   }
 
   void _openAddInterestSheet() {
     final customInputCtrl = TextEditingController();
+    String? sheetError;
 
     showModalBottomSheet(
       context: context,
@@ -136,11 +285,22 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: () {
-                            if (customInputCtrl.text.trim().isNotEmpty) {
-                              setState(() => _likes.add(customInputCtrl.text.trim()));
-                              customInputCtrl.clear();
-                              Navigator.pop(context);
+                            final text = customInputCtrl.text.trim();
+                            if (text.isEmpty) return;
+                            if (text.length > _maxLikeLen) {
+                              setSheetState(() => sheetError = 'Keep it under $_maxLikeLen characters.');
+                              return;
                             }
+                            if (_likes.length >= _maxLikes) {
+                              setSheetState(() => sheetError = 'Maximum $_maxLikes interests. Remove one first.');
+                              return;
+                            }
+                            if (_likes.any((l) => l.toLowerCase() == text.toLowerCase())) {
+                              setSheetState(() => sheetError = 'Already added.');
+                              return;
+                            }
+                            setState(() => _likes.add(text));
+                            Navigator.pop(context);
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
@@ -151,7 +311,15 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    if (sheetError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(sheetError!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                      ),
+                    const SizedBox(height: 8),
+                    Text('${_likes.length}/$_maxLikes selected',
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    const SizedBox(height: 12),
                     ..._suggestedInterests.entries.map((entry) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -182,7 +350,9 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                                     color: isSelected ? AppColors.primary : Colors.transparent,
                                   ),
                                 ),
-                                onSelected: (bool selected) {
+                                onSelected: (!isSelected && _likes.length >= _maxLikes)
+                                    ? null
+                                    : (bool selected) {
                                   setSheetState(() {
                                     setState(() {
                                       if (selected) {
@@ -244,19 +414,27 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                       child: Icon(Icons.person_rounded, size: 52, color: AppColors.textSecondary),
                     ),
                   ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                      child: const Icon(Icons.edit, color: Colors.white, size: 14),
-                    ),
-                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
+
+            _buildSavedSection(),
+            const SizedBox(height: 16),
+
+            if (_editingName != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text('Editing $_editingName',
+                          style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                    ),
+                    TextButton(onPressed: () => setState(_resetForm), child: const Text('Cancel edit')),
+                  ],
+                ),
+              ),
 
             _buildSectionCard(
               title: 'About them',
@@ -267,7 +445,14 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: Divider(color: AppColors.border, thickness: 1),
                 ),
-                _buildInputField(controller: _birthdayCtrl, label: 'Birthday (optional)', icon: Icons.cake_outlined),
+                GestureDetector(
+                  onTap: _pickBirthday,
+                  behavior: HitTestBehavior.opaque,
+                  child: AbsorbPointer(
+                    child: _buildInputField(
+                        controller: _birthdayCtrl, label: 'Birthday (optional, tap to pick)', icon: Icons.cake_outlined),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -290,7 +475,9 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             _buildSectionCard(
               title: 'Interests',
               icon: Icons.favorite_border_rounded,
-              actionWidget: GestureDetector(
+              actionWidget: _likes.length >= _maxLikes
+                  ? Text('$_maxLikes/$_maxLikes', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12))
+                  : GestureDetector(
                 onTap: _openAddInterestSheet,
                 child: Container(
                   padding: const EdgeInsets.all(6),
@@ -354,8 +541,8 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                   width: 20,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-                    : const Text(
-                  'Save profile',
+                    : Text(
+                  _editingName == null ? 'Save profile' : 'Update profile',
                   style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -365,6 +552,48 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildSavedSection() {
+    Widget body;
+    if (_loadingSaved) {
+      body = const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(strokeWidth: 2)));
+    } else if (_loadError != null) {
+      body = Row(
+        children: [
+          Expanded(child: Text(_loadError!, style: const TextStyle(color: AppColors.danger, fontSize: 13))),
+          TextButton(onPressed: _loadSaved, child: const Text('Retry')),
+        ],
+      );
+    } else if (_saved.isEmpty) {
+      body = const Text('No one saved yet. Add a friend below.',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 13));
+    } else {
+      body = Column(
+        children: _saved.map((f) {
+          String when = '';
+          if (f.daysUntilBirthday == 0) {
+            when = 'Birthday today';
+          } else if (f.daysUntilBirthday > 0 && f.reminderDue) {
+            when = 'Birthday in ${f.daysUntilBirthday} day(s)';
+          }
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            onTap: () => _startEdit(f),
+            title: Text(f.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+            subtitle: Text(
+              [f.relationship, if (f.likes.isNotEmpty) f.likes.join(', '), if (when.isNotEmpty) when].join(' · '),
+              style: TextStyle(color: f.reminderDue ? AppColors.primary : AppColors.textSecondary, fontSize: 12),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline, color: AppColors.textSecondary),
+              onPressed: () => _confirmDelete(f),
+            ),
+          );
+        }).toList(),
+      );
+    }
+    return _buildSectionCard(title: 'Saved people', icon: Icons.people_alt_outlined, children: [body]);
   }
 
   Widget _buildSectionCard({required String title, required IconData icon, required List<Widget> children, Widget? actionWidget}) {

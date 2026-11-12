@@ -50,7 +50,7 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
       setState(() {
         // MAP THE DATA: Convert the raw JSON list into strictly typed AuditEntry objects
         _auditLogs = (rawLogs as List)
-            .map((json) => AuditEntry.fromJson(json))
+            .map((json) => AuditEntry.fromJson(Map<String, dynamic>.from(json as Map)))
             .toList();
         _isLoading = false;
         _loadError = null;
@@ -63,6 +63,13 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
         if (!silent) _loadError = 'Could not load your activity.';
       });
     }
+  }
+
+  String _pkr(num v) {
+    final s = v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
+    final parts = s.split('.');
+    final whole = parts[0].replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+    return 'PKR ${parts.length > 1 ? '$whole.${parts[1]}' : whole}';
   }
 
   ({IconData icon, Color color, String label}) _getVisualConfig(String eventType) {
@@ -138,10 +145,21 @@ class _AuditTrailScreenState extends State<AuditTrailScreen> {
                         const SizedBox(height: 4),
                         // INJECT REAL DATA: Stop guessing keys. Map directly to the model.
                         Text(
-                          '${entry.item} · ${entry.brand} · PKR ${entry.cost} · Ref #${entry.id}',
+                          '${entry.item} · ${entry.brand} · ${_pkr(entry.cost)} · Ref #${entry.id}',
                           style: const TextStyle(
                               color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                         ),
+                        if (entry.reason != null && entry.reason!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.reason!,
+                            style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                                height: 1.3),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         // FIX THE TIME TRAVEL BUG: Use intl to format the strictly parsed DateTime
                         Text(

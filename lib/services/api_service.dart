@@ -82,8 +82,19 @@ class ApiService {
     }
   }
 
-  /// POST /api/friends. The backend must take the owner from the verified token, never from the body.
-  /// This endpoint is not built yet: the real server answers 404 today.
+  /// GET /api/friends. Throws on any failure so the screen can show an error instead of a fake empty list.
+  Future<List<dynamic>> getFriends() async {
+    if (AppMode.useMock) return <dynamic>[]; // MockBackend has no friend store; add one if you demo in mock mode
+    final url = Uri.parse('${ApiConfig.baseUrl}/friends');
+    final response = await _client.get(url, headers: await ApiConfig.authHeaders());
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    }
+    throw Exception('Backend Error (${response.statusCode}): ${response.body}');
+  }
+
+  /// POST /api/friends. The owner comes from the verified token, never from the body.
+  /// Server validation messages (400) are passed through to the user.
   Future<ApiResult> saveFriendProfile(Map<String, dynamic> profile) async {
     if (AppMode.useMock) return MockBackend.instance.saveFriend(profile);
     final url = Uri.parse('${ApiConfig.baseUrl}/friends');
@@ -93,18 +104,35 @@ class ApiService {
         headers: await ApiConfig.authHeaders(),
         body: jsonEncode(profile),
       );
-      final code = response.statusCode;
-      if (code >= 200 && code < 300) return const ApiResult(true, 200, '');
-      if (code == 401) {
-        return ApiResult(false, code, 'Your session expired. Please sign in again.');
-      }
-      if (code == 404) {
-        return ApiResult(false, code, "Friend profiles aren't available on the server yet.");
-      }
-      return ApiResult(false, code, "Couldn't save. Try again.");
+      return _friendResult(response);
     } catch (_) {
       return const ApiResult(false, 0, 'Network error: cannot reach the server.');
     }
+  }
+
+  /// DELETE /api/friends/{name}
+  Future<ApiResult> deleteFriend(String name) async {
+    if (AppMode.useMock) return const ApiResult(true, 200, '');
+    final url = Uri.parse('${ApiConfig.baseUrl}/friends/${Uri.encodeComponent(name)}');
+    try {
+      final response = await _client.delete(url, headers: await ApiConfig.authHeaders());
+      return _friendResult(response);
+    } catch (_) {
+      return const ApiResult(false, 0, 'Network error: cannot reach the server.');
+    }
+  }
+
+  ApiResult _friendResult(http.Response response) {
+    final code = response.statusCode;
+    if (code >= 200 && code < 300) return ApiResult(true, code, '');
+    if (code == 401) return ApiResult(false, code, 'Your session expired. Please sign in again.');
+    if (code == 404) return ApiResult(false, code, 'That contact was not found.');
+    if (code == 503) return ApiResult(false, code, 'Your contacts are temporarily unavailable. Try again.');
+    if (code == 400) {
+      final text = response.body.replaceFirst(RegExp(r'^(ERROR|SUCCESS):\s*'), '').trim();
+      return ApiResult(false, code, text.isNotEmpty ? text : 'Please check the details and try again.');
+    }
+    return ApiResult(false, code, "Couldn't complete that. Try again.");
   }
 
   Future<List<dynamic>> getAuditLog() async {

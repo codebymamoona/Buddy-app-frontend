@@ -5,18 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'services/push_service.dart';
 import 'theme/app_theme.dart';
 import 'config/app_mode.dart';
-import 'models/spending_cap.dart';
-import 'models/audit_entry.dart';
-import 'models/gift_idea.dart';
-import 'models/user_preferences.dart';
 import 'screens/login_screen.dart';
-import 'screens/preferences_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/approval_screen.dart';
 import 'screens/friend_profile_screen.dart';
 import 'screens/audit_trail_screen.dart';
 //import 'screens/gift_recommendation_screen.dart';
-import 'screens/spending_cap_settings_screen.dart';
 import 'screens/settings_screen.dart';
 import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
@@ -415,31 +409,8 @@ class HomeTabs extends StatefulWidget {
   State<HomeTabs> createState() => _HomeTabsState();
 }
 
-class _HomeTabsState extends State<HomeTabs> {
+class _HomeTabsState extends State<HomeTabs> with WidgetsBindingObserver {
   int _index = 0;
-  String? _pendingQuickReplyMessage; // Tracks incoming messages from overlay
-
-  // Central app state
-  double _capLimit = 2000;
-  double _capUsed = 450;
-  double _pendingAmount = 450;
-  String _pendingItem = 'Birthday cake order for Ayesha';
-
-  final List<AuditEntry> _auditEntries = [
-    AuditEntry(
-        id: 999, brand: 'System', item: 'Cake', cost: 450.0, timestamp: DateTime.now(), status: 'DRAFTED'),
-  ];
-
-  final List<GiftIdea> _giftIdeas = [
-    GiftIdea(
-        title: 'Scented candle set', price: 800, reason: 'She mentioned liking cozy things'),
-    GiftIdea(
-        title: 'Book: Local bestseller', price: 1200, reason: 'Likes reading, per her profile'),
-    GiftIdea(
-        title: 'Shopping: Ethnic Brand', price: 5000, reason: 'love wearing new clothes'),
-    GiftIdea(
-        title: 'Perfume: Janan set', price: 8000, reason: 'perfume lover'),
-  ];
 
   static const _titles = [
     'Buddy AI Assistant',
@@ -452,64 +423,86 @@ class _HomeTabsState extends State<HomeTabs> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initOverlayListener();
+    PushService.openApprovalRequests.addListener(_onOpenApprovalRequested);
+    PushService.openChatRequests.addListener(_openChatFromPush);
+    AppSignals.pendingCount.addListener(_syncOverlayBadge);
+    // A push tapped while the app was closed: HomeTabs did not exist yet, so pick it up now.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (PushService.consumeOpenRequest()) {
+        _goToTab(1);
+      } else {
+        _openChatFromPush();
+      }
+    });
+  }
+
+  // Foreground / background -> foreground: never show stale approvals.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      AppSignals.refreshApprovals();
+      AppSignals.refreshAudit();
+    }
+  }
+
+  // Birthday reminder tapped: show Chat with the "want gift ideas?" notice. Nothing is ordered here.
+  void _openChatFromPush() {
+    if (!mounted) return;
+    final notice = PushService.consumeChatNotice();
+    if (notice == null) return;
+    _goToTab(0);
+    AppSignals.notifyChat(notice);
+  }
+
+  void _onOpenApprovalRequested() {
+    if (!mounted) return;
+    PushService.consumeOpenRequest();
+    _goToTab(1);
+  }
+
+  // Keep the floating bubble's badge equal to the real pending count.
+  void _syncOverlayBadge() async {
+    try {
+      await FlutterOverlayWindow.shareData(AppSignals.pendingCount.value);
+    } catch (_) {
+      // overlay not running; nothing to update
+    }
   }
 
   void _initOverlayListener() {
-    // Cancel previous subscription if it exists
     _overlaySubscription?.cancel();
-
     _overlaySubscription = _overlayEvents.listen(
           (event) async {
         if (!mounted) return;
-
         if (event == "OPEN_APPROVAL") {
           _goToTab(1);
         } else if (event == "OPEN_CHAT") {
           setState(() => _index = 0);
         } else if (event is String && event.startsWith("QUICK_REPLY:")) {
-          final quickMsg = event.replaceFirst("QUICK_REPLY:", "").trim();
-          final lowerMsg = quickMsg.toLowerCase();
-
-          final isPurchaseIntent = lowerMsg.contains("order") ||
-              lowerMsg.contains("buy") ||
-              lowerMsg.contains("purchase") ||
-              lowerMsg.contains("get") ||
-              lowerMsg.contains("pay");
-
-          if (isPurchaseIntent) {
-            final formattedItem = quickMsg.isNotEmpty ? quickMsg : "Requested Order";
-
-            await _bringAppToForeground();
-
-            setState(() {
-              _pendingItem = formattedItem;
-              _pendingAmount = 500.0;
-              _index = 1; // Switch to Approval tab
-            });
-
-            await FlutterOverlayWindow.shareData("SHOW_APPROVAL_BADGE");
-            _showSnack('Approval requested for: "$formattedItem"', AppColors.primary);
-          } else {
-            await _bringAppToForeground();
-            setState(() {
-              _index = 0;
-              _pendingQuickReplyMessage = quickMsg;
-            });
-            _showSnack('Sent to Buddy: "$quickMsg"', AppColors.primary);
-          }
+          // Honest behaviour: the overlay text is NOT yet routed into the chat pipeline,
+          // so nothing is drafted or ordered from here.
+          await _bringAppToForeground();
+          if (!mounted) return;
+          setState(() => _index = 0);
+          _showSnack('Quick replies are not connected to Buddy yet. Type your request in Chat.',
+              AppColors.warning);
         }
       },
       onError: (error) {
         debugPrint("Overlay stream error: $error");
-        // Re-initialize listener if it crashes or disconnects
-        _initOverlayListener();
       },
     );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    PushService.openApprovalRequests.removeListener(_onOpenApprovalRequested);
+    PushService.openChatRequests.removeListener(_openChatFromPush);
+    AppSignals.pendingCount.removeListener(_syncOverlayBadge);
     _overlaySubscription?.cancel();
     super.dispose();
   }
@@ -522,66 +515,6 @@ class _HomeTabsState extends State<HomeTabs> {
     } catch (e) {
       debugPrint("Failed to bring app to foreground: $e");
     }
-  }
-
-  // PARAMETERS REMOVED HERE
-  void _handleChatPurchaseIntent() {
-    setState(() {
-      _pendingItem = "Pending AI Draft (Check Database)";
-      _pendingAmount = 0.0;
-    });
-
-    // Notify the floating bubble overlay to increment badge
-    FlutterOverlayWindow.shareData("SHOW_APPROVAL_BADGE");
-
-    Future.delayed(const Duration(milliseconds: 900), () {
-      if (mounted) setState(() => _index = 1);
-    });
-  }
-
-  void _handleApprove() {
-    setState(() {
-      _capUsed += _pendingAmount;
-      _auditEntries.insert(
-        0,
-        AuditEntry(
-            id: 999, brand: 'System', item: _pendingItem, cost: _pendingAmount, timestamp: DateTime.now(), status: 'APPROVED'),
-      );
-    });
-
-    // Clear badge on approval
-    FlutterOverlayWindow.shareData("CLEAR_BADGE");
-    _showSnack('Approved', AppColors.success);
-  }
-
-  void _handleDeny() {
-    setState(() {
-      _auditEntries.insert(
-        0,
-        AuditEntry(
-            id: 999, brand: 'System', item: _pendingItem, cost: _pendingAmount, timestamp: DateTime.now(), status: 'DENIED'),
-      );
-    });
-
-    // Clear badge on denial
-    FlutterOverlayWindow.shareData("CLEAR_BADGE");
-    _showSnack('Denied', AppColors.danger);
-  }
-
-  void _handleOrderGift(GiftIdea idea) {
-    setState(() {
-      _pendingAmount = idea.price;
-      _pendingItem = 'Gift: ${idea.title}';
-      _index = 1;
-    });
-
-    // Trigger badge increment for gift order approval
-    FlutterOverlayWindow.shareData("SHOW_APPROVAL_BADGE");
-  }
-
-  void _handleSaveCap(double newCap) {
-    setState(() => _capLimit = newCap);
-    _showSnack('Cap saved', AppColors.primary);
   }
 
   void _showSnack(String message, Color color) {
@@ -597,42 +530,33 @@ class _HomeTabsState extends State<HomeTabs> {
     );
   }
 
-    void _goToTab(int i) {
-      setState(() => _index = i);
-      if (i == 1) AppSignals.refreshApprovals();
-      if (i == 3) AppSignals.refreshAudit();
-    }
-
-    Widget _approveIcon(IconData icon) => ValueListenableBuilder<int>(
-          valueListenable: AppSignals.pendingCount,
-          builder: (_, n, __) =>
-              Badge(isLabelVisible: n > 0, label: Text('$n'), child: Icon(icon)),
-        );
-
-  void _openSpendingCapScreen() {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => const SpendingCapScreen(),
-    ));
+  void _goToTab(int i) {
+    setState(() => _index = i);
+    if (i == 1) AppSignals.refreshApprovals();
+    if (i == 3) AppSignals.refreshAudit();
   }
+
+  Widget _approveIcon(IconData icon) => ValueListenableBuilder<int>(
+    valueListenable: AppSignals.pendingCount,
+    builder: (_, n, __) =>
+        Badge(isLabelVisible: n > 0, label: Text('$n'), child: Icon(icon)),
+  );
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-            ChatScreen(
-              userId: widget.userEmail,
-              onOpenApproval: (id) {
-                AppSignals.focusActionId.value = id;
-                _goToTab(1);
-              },
-            ),
+      ChatScreen(
+        userId: widget.userEmail,
+        onOpenApproval: (id) {
+          AppSignals.focusActionId.value = id;
+          _goToTab(1);
+        },
+      ),
       ApprovalScreen(userId: widget.userEmail),
       FriendProfileScreen(userId: widget.userEmail),
       AuditTrailScreen(userId: widget.userEmail),
       SettingsScreen(userId: widget.userEmail),
     ];
-
-    // Clear pending quick message after injecting it to prevent repeated calls
-    _pendingQuickReplyMessage = null;
 
     return PopScope(
       canPop: _index == 0,
@@ -678,10 +602,10 @@ class _HomeTabsState extends State<HomeTabs> {
                 icon: Icon(Icons.chat_bubble_outline),
                 selectedIcon: Icon(Icons.chat_bubble),
                 label: 'Chat'),
-                        NavigationDestination(
-                            icon: _approveIcon(Icons.check_circle_outline),
-                            selectedIcon: _approveIcon(Icons.check_circle),
-                            label: 'Approve'),
+            NavigationDestination(
+                icon: _approveIcon(Icons.check_circle_outline),
+                selectedIcon: _approveIcon(Icons.check_circle),
+                label: 'Approve'),
             NavigationDestination(
                 icon: Icon(Icons.person_outline),
                 selectedIcon: Icon(Icons.person),

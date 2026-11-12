@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import 'spending_cap_settings_screen.dart';
 import '../config/app_mode.dart';
+import 'wallet_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   final String userId; // 🚨 FIXED: Now accepts the ID from main.dart
@@ -65,6 +66,23 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
+          _buildConfigCard(
+            title: 'Wallet',
+            icon: Icons.account_balance_wallet_outlined,
+            children: [
+              _buildInteractiveRow(
+                label: 'Balance, spending and top-up',
+                value: 'Open',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const WalletScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           _buildConfigCard(
             title: 'Spending controls',
             icon: Icons.security_rounded,

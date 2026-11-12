@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../services/wallet_service.dart';
 
 class SpendingCapScreen extends StatefulWidget {
   const SpendingCapScreen({super.key});
@@ -11,20 +12,24 @@ class SpendingCapScreen extends StatefulWidget {
 
 class _SpendingCapScreenState extends State<SpendingCapScreen> {
   final ApiService _api = ApiService();
+  final WalletService _walletApi = WalletService();
   double _dailyCap = 5000;
+  double _travelCap = 300000;
+  // What the server holds right now. Only a limit the user actually moved gets saved, so merely opening this
+  // screen can never overwrite a value that sits outside the slider range.
+  double _dailyLoaded = 5000;
+  double _travelLoaded = 300000;
+  bool _travelAvailable = false;
+
+  static const double _dailyMin = 500, _dailyMax = 20000;
+  static const double _travelMin = 50000, _travelMax = 1000000;
   bool _isSaving = false;
   bool _isLoading = true;
 
   final bool _autoApproveLocked = true;
-  final bool _categoryFirewallsLocked = true;
 
   double _threshold = 200;
   bool _autoApproveDraft = false;
-  final Map<String, double> _categoryDraft = {
-    'Food': 2000,
-    'Clothing': 2000,
-    'Travel': 1000,
-  };
 
   @override
   void initState() {
@@ -35,9 +40,18 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
   Future<void> _fetchCurrentCap() async {
     try {
       final cap = await _api.getSpendingCap();
+      final travel = await _walletApi.getTravelCap();
       if (!mounted) return;
       setState(() {
-        if (cap != null) _dailyCap = cap;
+        if (cap != null) {
+          _dailyCap = cap;
+          _dailyLoaded = cap;
+        }
+        if (travel.ok && travel.data != null) {
+          _travelCap = travel.data!;
+          _travelLoaded = travel.data!;
+          _travelAvailable = true;
+        }
         _isLoading = false;
       });
     } catch (e) {
@@ -45,44 +59,69 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Could not load your current cap. Showing default.'),
+          content: Text('Could not load your current limits. Showing defaults.'),
           backgroundColor: AppColors.danger,
         ),
       );
     }
   }
 
+  /// Saves only the limits that changed. If one fails the screen stays open and says which.
   Future<void> _saveCap() async {
+    final dailyChanged = _dailyCap != _dailyLoaded;
+    final travelChanged = _travelAvailable && _travelCap != _travelLoaded;
+    if (!dailyChanged && !travelChanged) {
+      _snack('Nothing to save. Move a slider first.');
+      return;
+    }
     setState(() => _isSaving = true);
+    final problems = <String>[];
     try {
-      final success = await _api.updateSpendingCap(_dailyCap);
-      if (!mounted) return;
-      setState(() => _isSaving = false);
-
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Daily spending cap updated.'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        Navigator.of(context).maybePop();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update your cap.'), backgroundColor: AppColors.danger),
-        );
+      if (dailyChanged) {
+        final ok = await _api.updateSpendingCap(_dailyCap);
+        if (ok) {
+          _dailyLoaded = _dailyCap;
+        } else {
+          problems.add('Could not update your daily limit.');
+        }
+      }
+      if (travelChanged) {
+        final r = await _walletApi.updateTravelCap(_travelCap);
+        if (r.ok) {
+          _travelLoaded = _travelCap;
+        } else {
+          problems.add(r.message);
+        }
       }
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isSaving = false);
+      problems.add('Network error: cannot reach the server.');
+    }
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    if (problems.isEmpty) {
+      _snack('Spending limits updated.');
+      Navigator.of(context).maybePop();
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Network error: cannot reach the server.'),
-          backgroundColor: AppColors.danger,
-        ),
+        SnackBar(content: Text(problems.join(' ')), backgroundColor: AppColors.danger),
       );
     }
+  }
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
+  }
+
+  static String _pkr(double v) {
+    final s = v.round().abs().toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
   }
 
   @override
@@ -111,22 +150,28 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
           _buildConfigCard(
-            title: 'Daily Spending Cap',
+            title: 'Daily Limit',
             icon: Icons.account_balance_wallet_outlined,
             children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Food, shopping and gifts',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(height: 8),
               Text(
-                'PKR ${_dailyCap.toStringAsFixed(0)} cap per day',
+                'PKR ${_pkr(_dailyCap)} per day',
                 style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13),
               ),
               const SizedBox(height: 16),
               Slider(
-                value: _dailyCap,
-                min: 500,
-                max: 20000,
+                value: _dailyCap.clamp(_dailyMin, _dailyMax).toDouble(),
+                min: _dailyMin,
+                max: _dailyMax,
                 divisions: 39,
                 activeColor: AppColors.primary,
                 inactiveColor: AppColors.border,
-                label: 'PKR ${_dailyCap.toStringAsFixed(0)}',
+                label: 'PKR ${_pkr(_dailyCap)}',
                 onChanged: (v) => setState(() => _dailyCap = v),
               ),
               const Align(
@@ -134,6 +179,44 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
                 child: Text('Drag to set your daily approval limit',
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
               ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _buildConfigCard(
+            title: 'Travel Limit',
+            icon: Icons.flight_takeoff_rounded,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Flights count here, not against your daily limit.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(height: 8),
+              if (!_travelAvailable)
+                const Text("Couldn't load your travel limit. Go back and open this screen again.",
+                    style: TextStyle(color: AppColors.danger, fontSize: 12.5))
+              else ...[
+                Text(
+                  'PKR ${_pkr(_travelCap)} per day',
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                Slider(
+                  value: _travelCap.clamp(_travelMin, _travelMax).toDouble(),
+                  min: _travelMin,
+                  max: _travelMax,
+                  divisions: 38,
+                  activeColor: AppColors.primary,
+                  inactiveColor: AppColors.border,
+                  label: 'PKR ${_pkr(_travelCap)}',
+                  onChanged: (v) => setState(() => _travelCap = v),
+                ),
+                const Align(
+                  alignment: Alignment.center,
+                  child: Text('Drag to set your daily travel limit',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 18),
@@ -194,21 +277,6 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          _buildConfigCard(
-            title: 'Category Firewalls',
-            icon: Icons.pie_chart_outline_rounded,
-            locked: _categoryFirewallsLocked,
-            lockedLabel: 'Coming in a future phase \u2014 not enforced yet',
-            children: _categoryDraft.keys
-                .map((category) => _CategoryCapRow(
-              category: category,
-              spent: 0,
-              cap: _categoryDraft[category]!,
-              onChanged: (v) {},
-            ))
-                .toList(),
-          ),
           const SizedBox(height: 28),
           SizedBox(
             height: 52,
@@ -222,7 +290,7 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
                   ? const SizedBox(
                   height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text(
-                'SAVE DAILY CAP',
+                'SAVE LIMITS',
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
               ),
             ),
@@ -268,63 +336,6 @@ class _SpendingCapScreenState extends State<SpendingCapScreen> {
           Opacity(
             opacity: locked ? 0.5 : 1.0,
             child: IgnorePointer(ignoring: locked, child: Column(children: children)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CategoryCapRow extends StatelessWidget {
-  final String category;
-  final double spent;
-  final double cap;
-  final ValueChanged<double> onChanged;
-
-  const _CategoryCapRow({required this.category, required this.spent, required this.cap, required this.onChanged});
-
-  IconData get _icon {
-    switch (category) {
-      case 'Food':
-        return Icons.restaurant_rounded;
-      case 'Clothing':
-        return Icons.shopping_bag_rounded;
-      case 'Travel':
-        return Icons.flight_takeoff_rounded;
-      default:
-        return Icons.category_rounded;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio = cap <= 0 ? 0.0 : (spent / cap).clamp(0.0, 1.0).toDouble();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(_icon, size: 16, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              Expanded(child: Text(category, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14))),
-              Text(
-                'PKR ${cap.toStringAsFixed(0)} cap',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: LinearProgressIndicator(
-              value: ratio,
-              minHeight: 6,
-              backgroundColor: AppColors.border,
-              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-            ),
           ),
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../services/app_signals.dart';
+import '../services/push_service.dart';
 
 class ApprovalScreen extends StatefulWidget {
   final String userId;
@@ -17,7 +18,8 @@ class _Outcome {
   final String title;
   final String detail;
   final bool success;
-  const _Outcome(this.title, this.detail, this.success);
+  final bool denied;
+  const _Outcome(this.title, this.detail, this.success, {this.denied = false});
 }
 
 class _ApprovalScreenState extends State<ApprovalScreen> {
@@ -60,6 +62,7 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
       if (!mounted) return;
       final list = actions.map((a) => Map<String, dynamic>.from(a as Map)).toList();
       AppSignals.pendingCount.value = list.length;
+      PushService.syncApprovalNotifications(list.length);
       setState(() {
         _pendingActions = list;
         _isLoading = false;
@@ -89,7 +92,9 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
       _submittingIds.remove(id);
       if (result.ok) {
         _outcomes.insert(
-            0, _Outcome(approving ? 'Order approved' : 'Order denied', description, true));
+            0,
+            _Outcome(approving ? 'Order approved' : 'Order denied', description, true,
+                denied: !approving));
       } else {
         _outcomes.insert(
             0,
@@ -102,6 +107,10 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
         ? 'Order approved: $description. Your order is being processed, please wait.'
         : 'Order denied: $description. Nothing was charged.')
         : "I couldn't complete that: ${result.message} ($description)");
+    // The order is settled (done, refused by the cap, or expired): its notification is stale either way.
+    if (result.ok || const [409, 410, 422].contains(result.statusCode)) {
+      PushService.cancelApprovalNotification(id);
+    }
     if (AppSignals.focusActionId.value == id) AppSignals.focusActionId.value = null;
     AppSignals.refreshAudit();
     await _fetchPendingActions(silent: true);
@@ -194,7 +203,12 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
   }
 
   Widget _buildOutcomeBanner(_Outcome o) {
-    final color = o.success ? AppColors.success : AppColors.danger;
+    final color = !o.success
+        ? AppColors.danger
+        : (o.denied ? AppColors.warning : AppColors.success);
+    final icon = !o.success
+        ? Icons.error_outline_rounded
+        : (o.denied ? Icons.block_rounded : Icons.check_circle_rounded);
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
@@ -206,7 +220,7 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(o.success ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: color),
+          Icon(icon, color: color),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -236,7 +250,9 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
     final id = (action['id'] as num).toInt();
     final payload = _payloadOf(action);
     final cost = (action['cost'] as num?)?.toDouble() ?? 0.0;
-    final isFood = payload['item'] != null && payload['brand'] != null;
+    final isGift = payload['recipient'] != null;
+    final isCommerce = !isGift && (payload['size'] != null || payload['color'] != null) && payload['item'] != null;
+    final isFood = !isGift && !isCommerce && payload['item'] != null && payload['brand'] != null;
     final qty = (payload['quantity'] as num?)?.toInt() ?? 1;
     final notes = payload['notes']?.toString() ?? '';
     final isSubmitting = _submittingIds.contains(id);
@@ -286,6 +302,31 @@ class _ApprovalScreenState extends State<ApprovalScreen> {
                     style: const TextStyle(
                         color: AppColors.textSecondary, fontSize: 13, fontStyle: FontStyle.italic)),
               ],
+            ] else if (isGift) ...[
+              Text('Gift for ${payload['recipient']}',
+                  style: const TextStyle(
+                      color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              _row('${payload['item']}', _pkr(cost)),
+              if ((payload['matchedInterest']?.toString() ?? '').isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('Matched interest: ${payload['matchedInterest']}',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+              ],
+            ] else if (isCommerce) ...[
+              Text('${payload['brand'] ?? 'Shopping'}',
+                  style: const TextStyle(
+                      color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              _row('$qty × ${payload['item']}', _pkr(cost)),
+              const SizedBox(height: 6),
+              Text(
+                [
+                  if (payload['size'] != null) 'Size: ${payload['size']}',
+                  if (payload['color'] != null) 'Color: ${payload['color']}',
+                ].join('  ·  '),
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              ),
             ] else ...[
               Text('${action['toolName'] ?? 'Buddy AI'}',
                   style: const TextStyle(

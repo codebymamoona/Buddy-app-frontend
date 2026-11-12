@@ -22,7 +22,7 @@ The Android build needs a google-services.json file even though mock mode never 
 
 
 
-&#x20;   Copy-Item android\\app\\google-services.mock.json android\\app\\google-services.json
+&#x20;   Copy-Item android\app\google-services.mock.json android\app\google-services.json
 
 
 
